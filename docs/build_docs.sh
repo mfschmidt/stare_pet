@@ -65,8 +65,9 @@ Thanks to Michael Altfield for his instructions in how to do this.
 https://tech.michaelaltfield.net/2020/07/18/sphinx-rtd-github-pages-1
 ">README.md
 
+ls -la .
 git add .
-
+git status
 git commit -am "updating docs for commit ${GITHUB_SHA} on `date -d"@${SOURCE_DATE_EPOCH}" --iso-8601=seconds` from ${GITHUB_REF} by ${GITHUB_ACTOR}"
 
 git push deploy gh-pages --force
