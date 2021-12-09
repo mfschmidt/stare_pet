@@ -17,9 +17,9 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'STARE'
-copyright = '2021, Betsy Bartlett and Mike Schmidt'
-author = 'Betsy Bartlett and Mike Schmidt'
+project = 'py_stare_pet'
+copyright = '2021 Mike Schmidt'
+author = 'Betsy Bartlett, Mike Schmidt, Francesca Zanderigo'
 
 # The full version, including alpha/beta/rc tags
 release = '0.0.1'
@@ -55,6 +55,8 @@ html_theme = 'sphinx_rtd_theme'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+master_doc = 'index'
 
 # Add source code to path
 import sys
