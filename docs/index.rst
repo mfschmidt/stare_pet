@@ -1,9 +1,9 @@
-.. STARE documentation master file, created by
+.. py_stare_pet documentation master file, created by
    sphinx-quickstart on Tue Dec  7 22:27:58 2021.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to STARE's documentation!
+Welcome to py_stare_pet's documentation!
 =================================
 
 .. toctree::
