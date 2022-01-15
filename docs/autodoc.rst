@@ -2,6 +2,15 @@
 
 .. contents::
 
+
+stare
+=====
+
+.. automodule:: stare
+  :members:
+  :undoc-members:
+
+
 util.py
 =======
 
