@@ -8,46 +8,46 @@ set -x
 #            .github/workflows/docs_pages_workflow.yml
 #
 # Authors: Mike Schmidt <mikeschmidt@schmidtgracen.com>
-#          forked from Michael Altfield's https://tech.michaelaltfield.net/2020/07/18/sphinx-rtd-github-pages-1/
+#          forked from Michael Altfield https://tech.michaelaltfield.net/2020/07/18/sphinx-rtd-github-pages-1/
 # Created: 2021-12-08
 # Updated: 2021-12-08
 # Version: 0.0.1
 ################################################################################
 
 ################################################################################
-# 
+# Configure the VM environment
 ################################################################################
 
 apt-get update
 apt-get install -y git rsync python3-sphinx python3-sphinx-rtd-theme
 
 ################################################################################
-#
+# Remember the context
 ################################################################################
 
 pwd
 ls -lah
-export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+export SOURCE_DATE_EPOCH
 
 ################################################################################
-#
+# Build the documentation
 ################################################################################
 
-# Build documentation
 make -C docs clean
 make -C docs html
 
 ################################################################################
-#
+# Update ephemeral github pages branch
 ################################################################################
 
 git config --global user.name "${GITHUB_ACTOR}"
 git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
 
-docroot=`mktemp -d`
-rsync -av "docs/_build/html/" "${docroot}/"
+doc_root=$(mktemp -d)
+rsync -av "docs/_build/html/" "${doc_root}/"
 
-pushd "${docroot}"
+pushd "${doc_root}" || exit
 
 # This is generated freshly each time, deleting any prior history.
 git init
@@ -58,8 +58,8 @@ git checkout -b gh-pages
 touch .nojekyll
 
 echo "
-This branch is a temporary cache of documentation. For actual documentation,
-see the main branch's docs folder.
+This branch is a temporary cache of bot-generated documentation.
+For actual documentation, see the main branch's docs folder.
 
 Thanks to Michael Altfield for his instructions in how to do this.
 https://tech.michaelaltfield.net/2020/07/18/sphinx-rtd-github-pages-1
@@ -68,11 +68,12 @@ https://tech.michaelaltfield.net/2020/07/18/sphinx-rtd-github-pages-1
 ls -la .
 git add .
 git status
-git commit -am "updating docs for commit ${GITHUB_SHA} on `date -d"@${SOURCE_DATE_EPOCH}" --iso-8601=seconds` from ${GITHUB_REF} by ${GITHUB_ACTOR}"
+DATE_STRING=$(date -d"@${SOURCE_DATE_EPOCH}" --iso-8601=seconds)
+git commit -am "updating docs for commit ${GITHUB_SHA} on ${DATE_STRING} from ${GITHUB_REF} by ${GITHUB_ACTOR}"
 
 git push deploy gh-pages --force
 
-popd
+popd || exit
 
 exit 0
 
