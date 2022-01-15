@@ -17,7 +17,7 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'py_stare_pet'
+project = 'stare_pet'
 copyright = '2021 Mike Schmidt'
 author = 'Betsy Bartlett, Mike Schmidt, Francesca Zanderigo'
 
