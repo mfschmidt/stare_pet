@@ -1,5 +1,9 @@
 name: docs_pages_workflow
 
+# Based upon [Michael Altfield's](https://stackoverflow.com/users/1174102/michael-altfield)
+# stackoverflow [answer](https://stackoverflow.com/a/62967771/2846766)
+# to a question asking how to do this.
+
 # Execute this workflow automatically when we push to main
 on:
   push:
@@ -26,4 +30,3 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: "docs/build_docs.sh"
       shell: bash
-
