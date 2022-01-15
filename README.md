@@ -13,5 +13,5 @@ and [preprint](https://doi.org/10.1101/2021.09.15.460504).
 
 ## Usage
 
-Documentation is being written, as is the code. All should be
-available on readthedocs upon release of working code.
+Documentation is being written, as is the code. Current incomplete docs
+are available via [github pages](https://mfschmidt.github.io/stare_pet/).
