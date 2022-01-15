@@ -6,10 +6,11 @@
 stare
 =====
 
-.. automodule:: stare
-  :members:
-  :undoc-members:
+.. autosummary::
+   :toctree: _autosummary
+   :recursive:
 
+   src
 
 util.py
 =======
