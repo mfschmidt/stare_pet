@@ -26,18 +26,18 @@ def correct_partial_volumes(thing):
     return thing
 
 
-def fit_vascular_mean_tac(thing):
+def fit_vascular_mean_tac(things):
     """ A function stub for fitting vascular mean tacs.
 
         This is just a stub function to examine sphinx, autodocumentation,
         and import paths.
 
-        :param str thing: the thing to print
+        :param list things: the things to return
 
         :return: None
     """
 
-    return thing
+    return things
 
 
 def tac_vascular_correction(thing):

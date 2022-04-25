@@ -117,7 +117,7 @@ def stare(args):
     # Then apply vascular correction
     rslt1 = tac_vascular_correction(rslt1)
 
-    # Bootstrap signal in PVC'ed vasculature to generate input functions
+    # Bootstrap signal in PVCed vasculature to generate input functions
     rslt2 = boot_anchor(rslt2)
 
     # Minimize the cost function
