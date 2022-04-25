@@ -3,17 +3,25 @@
 .. contents::
 
 
-stare
-=====
+stare executable
+================
+
+
+.. argparse::
+   :filename: bin/stare
+   :func: get_argument_parser
+   :prog: bin/stare
+
+starelib module
+================
 
 .. autosummary::
    :toctree: _autosummary
    :recursive:
 
-   src
+   starelib
 
-util.py
-=======
+or try this
 
 .. automodule:: util
   :members:
