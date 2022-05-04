@@ -28,23 +28,23 @@ def get_argument_parser():
         help="The subject id",
     )
     parser.add_argument(
-        "-i", "--input-path", default=".",
+        "-i", "--input-path", type=Path, default=".",
         help="The path for input files",
     )
     parser.add_argument(
-        "-o", "--output-path", default=".",
+        "-o", "--output-path", type=Path, default=".",
         help="The path for output files",
     )
     parser.add_argument(
-        "-a", "--axial-slices-to-clip", default=6,
+        "-a", "--axial-slices-to-clip", type=int, default=6,
         help="Axial slices to clip.",
     )
     parser.add_argument(
-        "-u", "--pet-units", default='kBq',
+        "-u", "--pet-units", type=str, default='kBq',
         help="PET Units, default to 'kBq'.",
     )
     parser.add_argument(
-        "--pvc-method", default='STC',
+        "--pvc-method", type=str, default='STC',
         help="PVC method"
              ", only 'single target correction' ('STC') is supported",
     )
@@ -61,15 +61,15 @@ def get_argument_parser():
         help="The vascular correction percentage, as an integer from 0 to 100",
     )
     parser.add_argument(
-        "--ignore-frames", nargs="+",
+        "--ignore-frames", type=int, nargs="+",
         help="Any frames listed with this argument will be ignored ",
     )
     parser.add_argument(
-        "--regions", nargs="+",
+        "--regions", type=str, nargs="+",
         help="Brain region names to be quantified in STARE."
     )
     parser.add_argument(
-        "-f", "--options-file",
+        "-f", "--options-file", type=str,
         help="A file containing command-line arguments."
              "The arguments in the file will override defaults,"
              "but be overridden by explicit command-line arguments."
@@ -148,6 +148,12 @@ def arguments_valid(args):
     else:
         file_handler.setLevel(logging.INFO)
         terminal_handler.setLevel(logging.ERROR)
+
+    # Ignored frames should be indexed by integer
+    if args.ignore_frames is None:
+        args.ignore_frames = []
+    else:
+        args.ignore_frames = [int(f) for f in args.ignore_frames]
 
     # If verbose is set, output all arguments
     logging.debug(f"Stare is running with these arguments.")
