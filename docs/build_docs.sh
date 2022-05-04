@@ -19,7 +19,10 @@ set -x
 ################################################################################
 
 apt-get update
-apt-get install -y git rsync python3-sphinx python3-sphinx-rtd-theme python3-sphinx-argparse
+apt-get install -y git rsync \
+                   python3-sphinx python3-sphinx-rtd-theme \
+                   python3-sphinx-argparse \
+                   python3-numpy python3-pandas python3-sklearn python3-humanize
 
 ################################################################################
 # Remember the context
