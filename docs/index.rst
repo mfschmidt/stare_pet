@@ -13,6 +13,8 @@ blood, input functions for PET modeling.
 .. image:: figures/bartlett_2022_stare_figure1.jpg
    :width: 1024
    :alt: Manuscript Figure 1
+   :caption: Bartlett, et al. 2022
+
 
 .. toctree::
    :maxdepth: 2
