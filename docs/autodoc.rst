@@ -30,5 +30,5 @@ or for an individual module
 
 or for individual methods
 
--- automethod:: plot_tacs
+.. automethod:: plot_tacs
    :members:
