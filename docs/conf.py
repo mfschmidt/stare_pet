@@ -10,15 +10,16 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
+sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('.'))
 
 
 # -- Project information -----------------------------------------------------
 
 project = 'stare_pet'
-copyright = '2021 Mike Schmidt'
+copyright = '2022 People at NYSPI'
 author = 'Betsy Bartlett, Mike Schmidt, Francesca Zanderigo'
 
 # The full version, including alpha/beta/rc tags
@@ -31,7 +32,8 @@ release = '0.0.1'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx_rtd_theme', 'sphinx.ext.autodoc'
+    'sphinx_rtd_theme', 'sphinx.ext.autodoc', 'sphinxarg.ext',
+    'sphinx.ext.autosummary',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -57,8 +59,3 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
 master_doc = 'index'
-
-# Add source code to path
-import sys
-import os
-sys.path.insert(0, os.path.abspath("../src"))

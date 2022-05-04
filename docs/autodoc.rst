@@ -8,9 +8,9 @@ stare executable
 
 
 .. argparse::
-   :filename: bin/stare
+   :filename: ../bin/stare
    :func: get_argument_parser
-   :prog: bin/stare
+   :prog: stare
 
 starelib module
 ================
@@ -30,5 +30,4 @@ or for an individual module
 
 or for individual methods
 
-.. automethod:: plot_tacs
-   :members:
+.. automethod:: starelib/plotting/plot_tacs
