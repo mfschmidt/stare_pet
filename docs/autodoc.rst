@@ -23,7 +23,6 @@ starelib module
 
 or try this
 
-.. automodule:: util
-  :members:
-  :undoc-members:
+.. automodule:: starelib
+
 
