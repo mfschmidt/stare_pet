@@ -15,14 +15,20 @@ stare executable
 starelib module
 ================
 
+for an autosummary
+
 .. autosummary::
    :toctree: _autosummary
    :recursive:
 
    starelib
 
-or try this
+or for an individual module
 
 .. automodule:: starelib
+   :members:
 
+or for individual methods
 
+-- automethod:: plot_tacs
+   :members:
