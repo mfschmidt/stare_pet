@@ -13,13 +13,12 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
-sys.path.insert(0, os.path.abspath('.'))
 
 
 # -- Project information -----------------------------------------------------
 
 project = 'stare_pet'
-copyright = '2022 People at NYSPI'
+copyright = '2022 Mike Schmidt'
 author = 'Betsy Bartlett, Mike Schmidt, Francesca Zanderigo'
 
 # The full version, including alpha/beta/rc tags

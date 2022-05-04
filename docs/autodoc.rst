@@ -22,12 +22,3 @@ for an autosummary
    :recursive:
 
    starelib
-
-or for an individual module
-
-.. automodule:: starelib
-   :members:
-
-or for individual methods
-
-.. automethod:: starelib/plotting/plot_tacs
