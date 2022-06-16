@@ -1,7 +1,7 @@
 setuptools~=62.1.0
 pandas~=1.4.2
 nibabel~=3.2.2
-numpy~=1.22.3
+numpy~=1.22.4
 humanize==4.1.0
 scikit-learn~=1.0.2
 matplotlib==3.5.2
