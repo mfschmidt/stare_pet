@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """ Setup module based on setuptools
 
     As recommended in the official python documentation at
@@ -7,4 +8,5 @@
 
 from setuptools import setup
 
-setup()
+if __name__ == "__main__":
+    setup()
