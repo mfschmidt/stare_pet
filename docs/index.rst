@@ -7,14 +7,11 @@ Welcome to STARE!
 =================
 
 Source-to-Target Automated Rotating Estimation (STARE)
-is an algorithm to estimate, rather than measure from collected
-blood, input functions for PET modeling.
+is described in [Bartlett, et al. 2022](https://doi.org/10.1016/j.neuroimage.2022.118901).
 
 .. figure:: figures/bartlett_2022_stare_figure1.jpg
    :width: 1024
    :alt: Manuscript Figure 1
-
-   An overview of the STARE algorithm from Bartlett, et al. 2022
 
 
 .. toctree::
@@ -22,11 +19,3 @@ blood, input functions for PET modeling.
    :caption: Contents:
 
    autodoc
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
