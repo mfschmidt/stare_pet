@@ -8,7 +8,7 @@
     from the command line.
 """
 
-from starelib.wrapper import get_argument_parser, arguments_valid, stare
+from starelib.wrapper import get_argument_parser, validate_arguments, stare
 
 
 def main(args):
@@ -19,7 +19,7 @@ def main(args):
     # notify the caller of any problems. If anything does not look
     # right, it will return False, and we will quit rather than
     # attempting to run with bad input.
-    if arguments_valid(args):
+    if validate_arguments(args):
         return stare(args)
     else:
         return 1
