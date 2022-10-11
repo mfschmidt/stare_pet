@@ -192,6 +192,7 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
                 this_centroid.features[feature_label] = fxn(this_centroid)
                 if this_centroid.features[feature_label]:
                     feature_counts[feature_label] += 1
+            feature_counts["total"] += 1
 
             all_centroids.append(this_centroid)
 
