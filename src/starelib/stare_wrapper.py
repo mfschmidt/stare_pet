@@ -2,16 +2,21 @@ import os
 import sys
 import argparse
 import logging
-import pickle
 from datetime import datetime
 from pathlib import Path
-from .util import get_tacs, get_images, get_mid_times, get_plasma
-from .vascular_cluster import vascular_clustering
+import nibabel as nib
+
+from .util import get_tacs, get_images, get_mid_times, get_plasma, \
+    combine_volumes_into_4d, image_in_millicuries
+from .clustering import two_step_clustering, best_of, \
+    save_centroid_masks
+from .centroid_heuristics import find_vascular_centroids
 from .partial_volume import correct_partial_volumes
-from .plotting import tacs_to_plottable_dataframe, plot_detailed_tacs
+from .fit_mean_tac import fit_vascular_mean_tac
+from .plotting import plot_detailed_tacs
 
 # temporary stubs
-from .util import fit_vascular_mean_tac, tac_vascular_correction,\
+from .util import tac_vascular_correction,\
                   boot_anchor, minimize_cost_function
 
 
@@ -143,21 +148,26 @@ def validate_arguments(args):
         errors.append(f"The input path, '{args.input_path}' does not exist.")
 
     # Ensure the output location exists, and is writable.
-    if not Path(args.output_path).name == args.subject:
+    setattr(args, "output_path", Path(args.output_path))
+    if not args.output_path.name == args.subject:
         args.output_path = Path(args.output_path) / args.subject
-    if not Path(args.output_path).exists():
-        Path(args.output_path).mkdir(parents=True, exist_ok=True)
-        logging.info(f"Creating '{args.output_path}', which did not exist.")
-    if not Path(args.output_path).exists():
-        msg = f"The output_path '{args.output_path}' does not exist and I cannot create it."
+    if not args.output_path.exists():
+        args.output_path.mkdir(parents=True, exist_ok=True)
+        logging.info(f"Creating '{str(args.output_path)}', which did not exist.")
+    if not args.output_path.exists():
+        msg = f"The output_path '{str(args.output_path)}' does not exist and I cannot create it."
         errors.append(msg)
     else:
-        tmp_file = Path(args.output_path) / "test.tmp"
+        tmp_file = args.output_path / "test.tmp"
         tmp_file.touch()
         if not tmp_file.exists():
-            msg = f"The output_path '{args.output_path}' is not writable."
+            msg = f"The output_path '{str(args.output_path)}' is not writable."
             errors.append(msg)
         os.remove(tmp_file)
+    (args.output_path / "debug").mkdir(parents=True, exist_ok=True)
+    (args.output_path / "cache").mkdir(parents=True, exist_ok=True)
+    (args.output_path / "figures").mkdir(parents=True, exist_ok=True)
+    (args.output_path / "masks").mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
     print("regions:", args.regions)
@@ -211,72 +221,110 @@ def stare(args):
     begin_timestamp = datetime.now()
     logger.info(f"Begin STARE at {begin_timestamp}.")
 
-    # Read data
+    # Read PET data
     tacs = get_tacs(
         args.input_path, args.subject
     )
+    if tacs is None:
+        logger.error("Failed to load TACs")
+
     plasma_tac = get_plasma(
         args.input_path, args.subject
     )
-    mid_times = get_mid_times(
+    if plasma_tac is None:
+        logger.error("Failed to load plasma TAC")
+
+    mid_times, ignored_mid_times = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
     )
+    if mid_times is None:
+        logger.error("Failed to load midtimes")
+
     orig_images = get_images(
         args.input_path, args.output_path, args.subject, args.ignore_frames
     )
+    if orig_images is None:
+        logger.error("Failed to load PET image data")
 
-    # Run two-step vascular k-means clustering
-    best_mask, best_centroid_1, best_centroid_2 = vascular_clustering(
-        args.output_path, orig_images,
+    # Step 0. Format PET data
+
+    # Collect all the 3d image data into a single 4d structure.
+    combined_image = combine_volumes_into_4d(
+        orig_images, args.output_path / "orig.nii.gz", logger=logger
+    )
+    combined_template = combined_image.slicer[:, :, :, 0]
+
+    # Handle any requested axial clipping.
+    # if axial_slices_to_clip == zero, this will not affect the image.
+    # The header is updated along with the data.
+    cropped_image = combined_image.slicer[:, :, args.axial_slices_to_clip:, :]
+    nib.save(cropped_image, args.output_path / "orig_cropped.nii.gz")
+    logger.debug(f"WROTE orig_cropped.nii.gz ({cropped_image.shape}) "
+                 f"to {str(args.output_path)}")
+    cropped_template = cropped_image.slicer[:, :, :, 0]
+
+    # PET data should be in units of 'mCi'
+    mci_image = image_in_millicuries(cropped_image, args.pet_units)
+
+    # -------------------------------------------------------------------------
+    # Step 1. Run two-step vascular k-means clustering
+
+    centroids_step_1, centroids_step_2 = two_step_clustering(
+        mci_image,
+        step_one_ks=list(range(6, 40, 4)),
+        step_two_ks=[4, ],
+        output_path=args.output_path,
         mid_times=mid_times,
-        pet_units=args.pet_units,
-        axial_slices_to_clip=args.axial_slices_to_clip,
+        cluster_function=find_vascular_centroids,
         force=args.force,
         verbose=args.verbose
     )
+    best_centroid_step_1 = best_of(centroids_step_1)
+    best_centroid_step_2 = best_of(centroids_step_2)
+    for centroid_list in [centroids_step_1, centroids_step_2, ]:
+        best_atlas = save_centroid_masks(
+            centroid_list, args.output_path / "masks",
+            cropped_template, combined_template,
+            axial_slices_to_clip=args.axial_slices_to_clip,
+            verbose=args.verbose
+        )
+    if best_atlas is None:
+        logger.error("Could not determine best centroid, cannot continue PVC.")
+        sys.exit(1)
 
-    # Correct partial volumes from vascular clustering
+    # -------------------------------------------------------------------------
+    # Step 2. Correct partial volumes from vascular clustering
+
     pvc_mean_centroid = correct_partial_volumes(
         orig_images,
         args.fwhm,
         args.output_path,
-        best_mask,
+        best_atlas,
         mid_times=mid_times,
     )
 
     # Paint a picture of progress so far
     fig_path = args.output_path / "figures"
     fig_path.mkdir(parents=True, exist_ok=True)
-
-    top_tacs_data = tacs_to_plottable_dataframe(
-        [best_centroid_1, best_centroid_2,
-         pvc_mean_centroid, plasma_tac, ],
-    )
-    # Customize the 'run' value for plotting with a legend
-    # three_tacs_data['run'] = three_tacs_data.apply(
-    #     lambda row: {
-    #         (best_centroid_1.source, best_centroid_1.k, best_centroid_1.label): "step 1",
-    #         (best_centroid_2.source, best_centroid_2.k, best_centroid_2.label): "step 2",
-    #         (pvc_mean_centroid.source, pvc_mean_centroid.k, pvc_mean_centroid.label): "pvc",
-    #         (plasma_tac.source, plasma_tac.k, plasma_tac.label): "plasma",
-    #     }.get((row['source'], row['k'], row['label']), "n/a"),
-    #     axis=1
-    # )
-    pickle.dump(
-        top_tacs_data,
-        (args.output_path / "figures" / "three_centroid_dataframe.pkl").open("wb")
-    )
-    # Create the plot
     fig_top_tacs = plot_detailed_tacs(
-        top_tacs_data,
+        data=[
+            best_centroid_step_1, best_centroid_step_2, pvc_mean_centroid, plasma_tac,
+        ],
         title=f"Subject {args.subject} Vascular TACs",
-        palette={"step 1": "blue", "step 2": "green",
-                 "pvc": "orange", "plasma": "red", },
+        palette={
+            best_centroid_step_1.name: "blue",
+            best_centroid_step_2.name: "green",
+            pvc_mean_centroid.name: "orange",
+            plasma_tac.name: "red",
+        },
     )
-    fig_top_tacs.savefig(fig_path / "three_tacs.png")
+    fig_top_tacs.savefig(fig_path / "four_tacs.png")
 
-    # Correct TACs by extracting the mean signal from each cluster
-    rslt3 = fit_vascular_mean_tac(tacs)
+    # -------------------------------------------------------------------------
+    # Step 3. Correct TACs by extracting the mean signal from each cluster
+    # Needs to know about ignored mid-times to weight durations appropriately
+    fit_tac = fit_vascular_mean_tac(pvc_mean_centroid, ignored_mid_times, fig_path)
+
     # Then apply vascular correction
     rslt1 = tac_vascular_correction(pvc_mean_centroid)
 
@@ -284,7 +332,7 @@ def stare(args):
     rslt2 = boot_anchor(pvc_mean_centroid)
 
     # Minimize the cost function
-    rslt3 = minimize_cost_function(rslt3)
+    rslt3 = minimize_cost_function(fit_tac)
 
     # Since all functions are stubs, just keep python's
     # linters happy by using the rslts
