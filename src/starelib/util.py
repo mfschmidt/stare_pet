@@ -109,11 +109,12 @@ def get_mid_times(input_path, subject_id, frames_to_ignore):
         logger.warning(
             f"  {len(frames_to_ignore)} frames being removed."
         )
-        mid_times = mid_times[
-            ~mid_times.index.isin([f - 1 for f in frames_to_ignore])
-        ]
         ignored_mid_times = mid_times[
             mid_times.index.isin([f - 1 for f in frames_to_ignore])
+        ]
+        # Replace mid_times AFTER the ignored time point has been stored.
+        mid_times = mid_times[
+            ~mid_times.index.isin([f - 1 for f in frames_to_ignore])
         ]
     else:
         ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
