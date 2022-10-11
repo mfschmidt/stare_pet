@@ -313,9 +313,9 @@ def stare(args):
         title=f"Subject {args.subject} Vascular TACs",
         palette={
             best_centroid_step_1.name: "blue",
-            best_centroid_step_2.name: "green",
+            best_centroid_step_2.name: "red",
             pvc_mean_centroid.name: "orange",
-            plasma_tac.name: "red",
+            plasma_tac.name: "green",
         },
     )
     fig_top_tacs.savefig(fig_path / "four_tacs.png")
