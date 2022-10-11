@@ -7,6 +7,7 @@ from collections import namedtuple
 import nibabel as nib
 from nibabel.funcs import concat_images
 from humanize import ordinal
+import nilearn.image
 
 from .timeactivitycurve import TimeActivityCurve
 
@@ -86,7 +87,11 @@ def get_plasma(input_path, subject_id):
             activity=plasma_data['PlasRawY'].values.astype(float),
             timepoints=plasma_data['PlasRawT'].values.astype(float),
             source="plasma",
+            name="plasma",
         )
+    else:
+        # This should not happen
+        return None
 
 
 def get_mid_times(input_path, subject_id, frames_to_ignore):
@@ -95,7 +100,7 @@ def get_mid_times(input_path, subject_id, frames_to_ignore):
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
     :param frames_to_ignore: ignored frames to cut from the list
-    :return pandas.DataFrame: mid-times
+    :return tuple: array of raw mid-times, mid-times w/o ignored frames
     """
 
     logger = logging.getLogger("STARE")
@@ -107,8 +112,16 @@ def get_mid_times(input_path, subject_id, frames_to_ignore):
         mid_times = mid_times[
             ~mid_times.index.isin([f - 1 for f in frames_to_ignore])
         ]
+        ignored_mid_times = mid_times[
+            mid_times.index.isin([f - 1 for f in frames_to_ignore])
+        ]
+    else:
+        ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
 
-    return mid_times['t'].values
+    if mid_times is not None and 't' in mid_times:
+        return mid_times['t'].values, ignored_mid_times['t'].values
+    else:
+        return None, None
 
 
 def get_images(input_path, output_path, subject_id, frames_to_ignore):
@@ -265,19 +278,50 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
     return combined_image
 
 
-def fit_vascular_mean_tac(things):
-    """ A function stub for fitting vascular mean tacs.
+def characterize_mid_times(mid_times, missing_mid_times=None, beginning=0.0):
+    """ From an array of timing mid-points, return durations and end points.
 
         This is just a stub function to examine sphinx, autodocumentation,
         and import paths.
 
-        :param list things: the things to return
+        :param Iterable mid_times: A list or array of timing midpoints.
+        :param Iterable missing_mid_times: left out timing midpoints.
+        :param float beginning: Assumed 0.0, when the first mid-time started
 
-        :return: None
+        :return: endpoints, durations, weights
     """
 
-    logging.info("Running a stub for fitting vascular mean TAC.")
-    return things
+    # Finalize the complete mid_times vector
+    if missing_mid_times is None:
+        all_times = sorted(set(mid_times))
+    else:
+        all_times = sorted(set(np.concatenate([
+            mid_times, missing_mid_times,
+        ])))
+
+    # Loop over mid_times, filling in start, end, and duration for each.
+    start_times = [beginning, ]
+    rows = []
+    for i, t in enumerate(all_times):
+        duration = 2 * (t - start_times[-1])
+        end_time = start_times[-1] + duration
+        row = {
+            "t_start": start_times[-1],
+            "t_mid": t,
+            "t_end": end_time,
+            "duration": duration,
+            "used": t in mid_times,
+        }
+        rows.append(row)
+        start_times.append(end_time)
+
+    # An alternative way to calculate 't_end' values uses scipy.signals:
+    # end_time_frame = lfilter([2, ], [1, 1, ], mid_times)
+    # but even though I watch it return identical values,
+    # I don't understand how it works, so I wrote it out here
+    # explicitly instead. I guess I need to learn more signal processing.
+
+    return pd.DataFrame(rows)
 
 
 def tac_vascular_correction(thing):
@@ -323,3 +367,20 @@ def minimize_cost_function(thing):
 
     logging.info("Running a stub for cost function minimization.")
     return thing
+
+
+def image_in_millicuries(image, units):
+    """ Return an image in millicuries from existing units.
+
+        :param Nifti1Image image: The current image
+        :param str units: The current image's units
+    """
+
+    # If they already are in millicuries, good,
+    # but other units get converted here.
+    if units.lower() == "kbq":
+        return nilearn.image.math_img('a / 37000', a=image)
+    elif units.lower() == "bq":
+        return nilearn.image.math_img('a / 37000000', a=image)
+    else:
+        return image
