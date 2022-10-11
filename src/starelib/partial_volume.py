@@ -103,4 +103,5 @@ def correct_partial_volumes(
         activity=vascular_tac_mean,
         timepoints=np.array(mid_times),
         source="pvc",
+        name="pvc",
     )
