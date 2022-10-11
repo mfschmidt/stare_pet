@@ -6,21 +6,21 @@
 #
 cycler==0.11.0
     # via matplotlib
-fonttools==4.34.4
+fonttools==4.37.4
     # via matplotlib
-humanize==4.1.0
+humanize==4.4.0
     # via stare-pet (pyproject.toml)
-joblib==1.1.0
+joblib==1.2.0
     # via scikit-learn
 kiwisolver==1.4.4
     # via matplotlib
-matplotlib==3.5.2
+matplotlib==3.6.1
     # via
     #   seaborn
     #   stare-pet (pyproject.toml)
-nibabel==4.0.1
+nibabel==4.0.2
     # via stare-pet (pyproject.toml)
-numpy==1.23.1
+numpy==1.23.3
     # via
     #   matplotlib
     #   nibabel
@@ -33,7 +33,7 @@ packaging==21.3
     # via
     #   matplotlib
     #   nibabel
-pandas==1.4.3
+pandas~=1.5.0.dev0+939.g5465f54f76
     # via
     #   seaborn
     #   stare-pet (pyproject.toml)
@@ -47,15 +47,15 @@ python-dateutil==2.8.2
     # via
     #   matplotlib
     #   pandas
-pytz==2022.1
+pytz==2022.4
     # via pandas
-scikit-learn==1.1.1
+scikit-learn==1.1.2
     # via stare-pet (pyproject.toml)
-scipy==1.8.1
+scipy==1.9.2
     # via
     #   scikit-learn
     #   seaborn
-seaborn==0.11.2
+seaborn==0.12.0
     # via stare-pet (pyproject.toml)
 six==1.16.0
     # via python-dateutil
@@ -64,3 +64,6 @@ threadpoolctl==3.1.0
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
+
+nilearn~=0.9.1
+setuptools~=65.4.1
