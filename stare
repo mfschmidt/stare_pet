@@ -1,0 +1,13 @@
+#!/bin/bash
+
+export HOSTUID=$(id -u)
+export HOSTGID=$(id -g)
+docker run -it \
+  --user $HOSTUID:$HOSTGID \
+  --workdir="${HOME}" \
+  --volume="/etc/group:/etc/group:ro" \
+  --volume="/etc/passwd:/etc/passwd:ro" \
+  --volume="/etc/shadow:/etc/shadow:ro" \
+  --volume="${HOME}:${HOME}" \
+  stare_pet:0 /bin/bash
+
