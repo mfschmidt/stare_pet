@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+
+""" vasc_clust_er176
+
+    This is a command-line interface to the stare_pet library and pipeline.
+
+    This entire file is a wrapper to allow execution of stare_lib code
+    from the command line.
+"""
+
+from starelib.er176_wrapper import get_argument_parser, validate_arguments, vasc_clust_er176
+
+
+def main(args):
+    """ Entry point """
+
+    # Asking wrapper.arguments_valid to handle arguments allows it to
+    # fill in defaults, check for consistency and validity, and
+    # notify the caller of any problems. If anything does not look
+    # right, it will return False, and we will quit rather than
+    # attempting to run with bad input.
+    if validate_arguments(args):
+        return vasc_clust_er176(args)
+    else:
+        return 1
+
+
+if __name__ == "__main__":
+    main(get_argument_parser().parse_args())
