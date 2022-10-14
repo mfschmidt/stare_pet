@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import nibabel as nib
+import pickle
 
 from .util import get_tacs, get_images, get_mid_times, get_plasma, \
     combine_volumes_into_4d, image_in_millicuries
@@ -14,10 +15,11 @@ from .centroid_heuristics import find_vascular_centroids
 from .partial_volume import correct_partial_volumes
 from .fit_mean_tac import fit_vascular_mean_tac
 from .plotting import plot_detailed_tacs
+from .vascular_correction import tac_vascular_correction
+from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
 
 # temporary stubs
-from .util import tac_vascular_correction,\
-                  boot_anchor, minimize_cost_function
+from .util import boot_anchor, minimize_cost_function
 
 
 def get_argument_parser():
@@ -164,10 +166,14 @@ def validate_arguments(args):
             msg = f"The output_path '{str(args.output_path)}' is not writable."
             errors.append(msg)
         os.remove(tmp_file)
-    (args.output_path / "debug").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "cache").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "figures").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "masks").mkdir(parents=True, exist_ok=True)
+    setattr(args, "fig_path", Path(args.output_path) / "figures")
+    args.fig_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "debug_path", Path(args.output_path) / "debug")
+    args.debug_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "cache_path", Path(args.output_path) / "cache")
+    args.cache_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "mask_path", Path(args.output_path) / "masks")
+    args.mask_path.mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
     print("regions:", args.regions)
@@ -273,12 +279,31 @@ def stare(args):
         mci_image,
         step_one_ks=list(range(6, 40, 4)),
         step_two_ks=[4, ],
-        output_path=args.output_path,
         mid_times=mid_times,
+        cache_path=args.cache_path,
         cluster_function=find_vascular_centroids,
         force=args.force,
         verbose=args.verbose
     )
+    # Plot the TACs from the first k-means step
+    fig = plot_vascular_tacs(centroids_step_1)
+    fig.savefig(args.fig_path / "step_1_vascular_tacs.png")
+    fig = plot_vascular_tacs(centroids_step_2)
+    fig.savefig(args.fig_path / "step_2_vascular_tacs.png")
+
+    if args.verbose > 1:
+        # These data can be used to build custom plots or otherwise explore.
+        tacs_to_plottable_dataframe(centroids_step_1).to_csv(
+            args.debug_path / "step_1_centroids.csv"
+        )
+        logger.debug(f"WROTE step_1_centroids.csv to {str(args.debug_path)}")
+        tacs_to_plottable_dataframe(centroids_step_2).to_csv(
+            args.debug_path / "step_2_centroids.csv"
+        )
+        logger.debug(f"WROTE step_2_centroids.csv to {str(args.debug_path)}")
+
+
+
     best_centroid_step_1 = best_of(centroids_step_1)
     best_centroid_step_2 = best_of(centroids_step_2)
     for centroid_list in [centroids_step_1, centroids_step_2, ]:
@@ -295,41 +320,42 @@ def stare(args):
     # -------------------------------------------------------------------------
     # Step 2. Correct partial volumes from vascular clustering
 
-    pvc_mean_centroid = correct_partial_volumes(
+    pvc_mean_tac = correct_partial_volumes(
         orig_images,
         args.fwhm,
         args.output_path,
         best_atlas,
         mid_times=mid_times,
+        verbose=args.verbose,
     )
+    if args.verbose > 1:
+        pickle.dump(pvc_mean_tac, open(args.output_path / "debug" / "pvc_mean_tac.pkl", "wb"))
 
     # Paint a picture of progress so far
-    fig_path = args.output_path / "figures"
-    fig_path.mkdir(parents=True, exist_ok=True)
     fig_top_tacs = plot_detailed_tacs(
         data=[
-            best_centroid_step_1, best_centroid_step_2, pvc_mean_centroid, plasma_tac,
+            best_centroid_step_1, best_centroid_step_2, pvc_mean_tac, plasma_tac,
         ],
         title=f"Subject {args.subject} Vascular TACs",
         palette={
             best_centroid_step_1.name: "blue",
             best_centroid_step_2.name: "red",
-            pvc_mean_centroid.name: "orange",
+            pvc_mean_tac.name: "orange",
             plasma_tac.name: "green",
         },
     )
-    fig_top_tacs.savefig(fig_path / "four_tacs.png")
+    fig_top_tacs.savefig(args.fig_path / "four_tacs.png")
 
     # -------------------------------------------------------------------------
     # Step 3. Correct TACs by extracting the mean signal from each cluster
     # Needs to know about ignored mid-times to weight durations appropriately
-    fit_tac = fit_vascular_mean_tac(pvc_mean_centroid, ignored_mid_times, fig_path)
+    fit_tac = fit_vascular_mean_tac(pvc_mean_tac, ignored_mid_times, args.fig_path)
 
     # Then apply vascular correction
-    rslt1 = tac_vascular_correction(pvc_mean_centroid)
+    rslt1 = tac_vascular_correction(tacs, args.regions, None, fit_tac)
 
     # Bootstrap signal in PVCed vasculature to generate input functions
-    rslt2 = boot_anchor(pvc_mean_centroid)
+    rslt2 = boot_anchor(rslt1)
 
     # Minimize the cost function
     rslt3 = minimize_cost_function(fit_tac)
@@ -338,7 +364,7 @@ def stare(args):
     # linters happy by using the rslts
     logger.debug(f"Ignore: {type(rslt1)}, {type(rslt2)}, {type(rslt3)}")
 
-    # Validate out_path argument
+    # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
     logger.info(f"STARE is finished at {finish_timestamp}.")
     logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")

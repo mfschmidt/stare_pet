@@ -7,7 +7,6 @@ from datetime import datetime
 import pickle
 
 from .util import flatten_4d_to_2d, reshape_labels_to_3d
-from .plotting import tacs_to_plottable_dataframe, plot_simple_tacs
 from .centroid import Centroid
 
 
@@ -188,6 +187,8 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
                 labels=k_means.labels_ + 1,
                 name=f"centroid {i + 1}/{k}"
             )
+            # Save features of this centroid, like whether it is
+            # noise, vascular, peripheral, etc. using functions provided.
             for feature_label, fxn in features.items():
                 this_centroid.features[feature_label] = fxn(this_centroid)
                 if this_centroid.features[feature_label]:
@@ -208,8 +209,8 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
 
 
 def two_step_clustering(
-        image, step_one_ks, step_two_ks, cluster_function, output_path,
-        mid_times, force=False, verbose=0
+        image, step_one_ks, step_two_ks, cluster_function, mid_times,
+        cache_path=None, force=False, verbose=0
 ):
     """ Perform two step clustering of PET data
 
@@ -225,7 +226,7 @@ def two_step_clustering(
         :param list step_one_ks: A list of ints to serve as cluster quantities
         :param list step_two_ks: A list of ints to serve as cluster quantities
         :param function cluster_function: A centroid selection function
-        :param Path output_path: the main output path for one subject
+        :param Path cache_path: the path for reading and writing cached data
         :param list mid_times: A list of images
         :param int force: If true, run everything regardless of cache
         :param int verbose: Set to non-zero to trigger logging, higher is more
@@ -237,10 +238,6 @@ def two_step_clustering(
 
     pre_kmc_timestamp = datetime.now()
     logger.info(f"Started two-level k-means clustering at {pre_kmc_timestamp}")
-
-    debug_path = output_path / "debug"
-    cache_path = output_path / "cache"
-    fig_path = output_path / "figures"
 
     # -------------------------------------------------------------------------
     # Step 0. Collect the individual 3D volumes provided,
@@ -257,35 +254,26 @@ def two_step_clustering(
     # -------------------------------------------------------------------------
 
     # If prior models were saved to disk, load them rather than running.
-    cache_file_1 = cache_path / "step_1_centroids_and_fits.pkl"
-    if cache_file_1.exists() and not force:
+    if cache_path is not None and cache_path.exists():
+        cache_file_1 = cache_path / "step_1_centroids_and_fits.pkl"
+    else:
+        cache_file_1 = None
+    if cache_file_1 is not None and cache_file_1.exists() and not force:
         logger.info("  loading cached step 1 k-means to save time")
         centroids_step_1, model_fits = pickle.load(cache_file_1.open("rb"))
     else:
         centroids_step_1, model_fits = cluster_function(
             to_cluster, step_one_ks, mid_times=mid_times, verbose=verbose
         )
-        cache_file_1.parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump((centroids_step_1, model_fits), cache_file_1.open("wb"))
-        logger.debug(f"WROTE {cache_file_1.name} (pickled all_centroids "
-                     f"and model_fits tuple) to {str(cache_path)}")
+        if cache_file_1 is not None:
+            pickle.dump((centroids_step_1, model_fits), cache_file_1.open("wb"))
+            logger.debug(f"WROTE {cache_file_1.name} (pickled all_centroids "
+                         f"and model_fits tuple) to {str(cache_path)}")
 
     # Label the best centroid for proper figure legend
     for c in centroids_step_1:
         if c.best_in_k:
             c.name = f"Best step 1. {c.name}"
-
-    if verbose > 1:
-        # These data can be used to build custom plots or otherwise explore.
-        debug_path.mkdir(parents=True, exist_ok=True)
-        tacs_to_plottable_dataframe(centroids_step_1).to_csv(
-            debug_path / "step_1_centroids.csv"
-        )
-        logger.debug(f"WROTE step_1_centroids.csv to {str(debug_path)}")
-
-    # Plot the TACs from the first k-means step
-    fig = plot_simple_tacs(centroids_step_1)
-    fig.savefig(fig_path / "step_1_vascular_tacs.png")
 
     # -------------------------------------------------------------------------
     # Step 2. Find the best candidate from step 1 for a vascular cluster of
@@ -309,31 +297,26 @@ def two_step_clustering(
     top_centroid_masked_data[top_cluster_mask] = to_cluster[top_cluster_mask, :]
 
     # Run the second k-means, but only on the best cluster from the first.
-    cache_file_2 = cache_path / "step_2_centroids_and_fits.pkl"
-    if cache_file_2.exists() and not force:
-        logger.info("  loading cached step 2 k-means to save time")
-        centroids_step_2, second_model_fits = pickle.load(cache_file_2.open("rb"))
+    # If prior models were saved to disk, load them rather than running.
+    if cache_path is not None and cache_path.exists():
+        cache_file_2 = cache_path / "step_2_centroids_and_fits.pkl"
     else:
-        centroids_step_2, second_model_fits = cluster_function(
+        cache_file_2 = None
+    if cache_file_2 is not None and cache_file_2.exists() and not force:
+        logger.info("  loading cached step 2 k-means to save time")
+        centroids_step_2, model_fits_2 = pickle.load(cache_file_2.open("rb"))
+    else:
+        centroids_step_2, model_fits_2 = cluster_function(
             top_centroid_masked_data, step_two_ks, mid_times=mid_times, verbose=verbose
         )
-        cache_file_2.parent.mkdir(parents=True, exist_ok=True)
-        pickle.dump((centroids_step_2, second_model_fits), cache_file_2.open("wb"))
-        logger.debug(f"WROTE step_2_centroids_and_fits.pkl to {str(cache_path)}")
+        if cache_file_2 is not None:
+            pickle.dump((centroids_step_2, model_fits_2), cache_file_2.open("wb"))
+            logger.debug(f"WROTE {cache_file_2.name} (pickled all_centroids "
+                         f"and model_fits tuple) to {str(cache_path)}")
 
     # Label the best centroid for proper figure legend
     for c in centroids_step_2:
         if c.best_in_k:
             c.name = f"Best step 2. {c.name}"
-
-    fig = plot_simple_tacs(centroids_step_2)
-    fig.savefig(fig_path / "step_2_vascular_tacs.png")
-    if verbose > 1:
-        # These data can be used to build custom plots or otherwise explore.
-        debug_path.mkdir(parents=True, exist_ok=True)
-        tacs_to_plottable_dataframe(centroids_step_2).to_csv(
-            debug_path / "step_2_centroids.csv"
-        )
-        logger.debug(f"WROTE step_2_centroids.csv to {str(debug_path)}")
 
     return centroids_step_1, centroids_step_2
