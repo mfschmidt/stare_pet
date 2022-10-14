@@ -210,7 +210,7 @@ def plot_detailed_tacs(data, title=None, palette=None, color_filter=None):
     ax_early.set_ylabel("Activity in mCi/cc")  # ranges -0.05 to +2.00
     ax_late.set_ylabel("Activity in mCi/cc")  # ranges typically -0.05 to +0.30
     ax_late.yaxis.set_label_position("right")
-    ax_late.tick_right()
+    ax_late.get_yaxis().tick_right()
 
     ax_full.legend(bbox_to_anchor=(0.50, -0.25), loc="upper center", borderaxespad=0)
 
