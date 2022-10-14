@@ -18,6 +18,16 @@ class TimeActivityCurve:
         self.source = source  # where did this centroid come from
         self.name = name  # what I should call this TAC in a figure legend
 
+        # Each centroid can also contain {label: value} features,
+        # initialized as an empty dict.
+        # An example would be
+        # {"likely_noise": True, "likely_irreversible": False}
+        # to label this centroid with those features.
+        # To use this, first initialize the Centroid with __init__,
+        # then add features to it like
+        #   c.features["label"] = value
+        self.features = {}
+
         # Calculated properties
         self.peak_value = np.max(self.activity)
         self.peak_index = np.argmax(self.activity)
