@@ -11,7 +11,7 @@ from .timeactivitycurve import TimeActivityCurve
 
 def correct_partial_volumes(
         images, fwhm, output_path, vasc_mask, mid_times=None, pet_units='kBq',
-        force=False, verbose=False
+        force=False, verbose=0
 ):
     """ Correct partial volumes
 
@@ -96,12 +96,12 @@ def correct_partial_volumes(
     )
 
     masked_data = reshaped_pvc_data[reshaped_vascular_mask_data.ravel() == 1]
-    vascular_tac_mean = np.mean(masked_data, axis=0)
-    # vascular_tac_sd = np.std(masked_data, axis=0)
 
-    return TimeActivityCurve(
-        activity=vascular_tac_mean,
+    post_pvc_tac = TimeActivityCurve(
+        activity=np.mean(masked_data, axis=0),
         timepoints=np.array(mid_times),
         source="pvc",
         name="pvc",
     )
+
+    return post_pvc_tac
