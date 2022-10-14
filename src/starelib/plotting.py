@@ -33,15 +33,16 @@ def tacs_to_plottable_dataframe(tacs):
                     "source": tac.source,
                     "best_overall": tac.best_overall if hasattr(tac, 'best_overall') else False,
                     "best_in_k": tac.best_in_k if hasattr(tac, 'best_in_k') else False,
-                    "vascular": tac.vascular if hasattr(tac, 'vascular') else False,
                     "name": "n/a" if tac.name is None else tac.name,
                 }
+                for feature, label in tac.features.items():
+                    row[feature] = label
                 rows.append(row)
 
     return pd.DataFrame(rows)
 
 
-def plot_simple_tacs(data, vascular_color='blue', highlight_color='red', ax=None):
+def plot_vascular_tacs(data, vascular_color='blue', highlight_color='red', ax=None):
     """ Plot a time activity curve (TAC), in one panel
 
         Given a long-format dataframe with TACs and their metadata,
@@ -66,14 +67,14 @@ def plot_simple_tacs(data, vascular_color='blue', highlight_color='red', ax=None
     data.loc[:, 'K'] = data['k'].apply(lambda k: f"{k:02d}")
 
     # Create color palettes that make all hues identical
-    num_gray_lines = len(data[data['vascular']]['name'].unique())
+    num_gray_lines = len(data[data['likely_vascular']]['name'].unique())
     grays = ['gray', ] * num_gray_lines
     num_vasc_lines = len(data[data['best_in_k']]['name'].unique())
     vascs = [vascular_color, ] * num_vasc_lines
 
-    # Plot every single centroid as light gray to provide context.
+    # Plot every vascular centroid as light gray to provide context.
     # These are plotted first to set them as background.
-    sns.lineplot(data=data[data['vascular']], x='t', y='activity', hue='name',
+    sns.lineplot(data=data[data['likely_vascular']], x='t', y='activity', hue='name',
                  palette=grays, alpha=0.5, linewidth=1, legend=False, ax=axes)
 
     # Next, plot the centroids that are the best for their k-means group
@@ -132,7 +133,7 @@ def plot_detailed_tacs(data, title=None, palette=None, color_filter=None):
 
     # Create the figure and lay out axes for three panels
     fig = plt.figure(figsize=(11, 11))
-    gs = gridspec.GridSpec(nrows=5, ncols=4)
+    gs = gridspec.GridSpec(nrows=6, ncols=4)
 
     ax_full = fig.add_subplot(gs[0:2, :])
     ax_early = fig.add_subplot(gs[3:, :2])
@@ -156,7 +157,7 @@ def plot_detailed_tacs(data, title=None, palette=None, color_filter=None):
     for i, ax in enumerate(axes):
         # Determine which time ranges are included in each axes
         if i == 2:
-            t_filter = data['t'] > 5.0
+            t_filter = data['t'] >= 5.0
             do_legend = False
         elif i == 1:
             t_filter = data['t'] <= 5.0
@@ -205,7 +206,11 @@ def plot_detailed_tacs(data, title=None, palette=None, color_filter=None):
 
         # Finish off the details so the plot is readable.
         ax.set_xlabel("Minutes")  # ranges 0 to 60
-        ax.set_ylabel("Activity in mCi/cc")  # ranges -0.05 to +0.30
+
+    ax_early.set_ylabel("Activity in mCi/cc")  # ranges -0.05 to +2.00
+    ax_late.set_ylabel("Activity in mCi/cc")  # ranges typically -0.05 to +0.30
+    ax_late.yaxis.set_label_position("right")
+    ax_late.tick_right()
 
     ax_full.legend(bbox_to_anchor=(0.50, -0.25), loc="upper center", borderaxespad=0)
 
