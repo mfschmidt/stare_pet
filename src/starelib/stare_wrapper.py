@@ -329,7 +329,7 @@ def stare(args):
         verbose=args.verbose,
     )
     if args.verbose > 1:
-        pickle.dump(pvc_mean_tac, open(args.output_path / "debug" / "pvc_mean_tac.pkl", "wb"))
+        pickle.dump(pvc_mean_tac, open(args.debug_path / "pvc_mean_tac.pkl", "wb"))
 
     # Paint a picture of progress so far
     fig_top_tacs = plot_detailed_tacs(
