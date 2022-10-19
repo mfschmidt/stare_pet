@@ -35,6 +35,10 @@ def get_argument_parser():
         help="The path for output files",
     )
     parser.add_argument(
+        "--cache-path", type=Path,
+        help="Fast local storage for caching interim data",
+    )
+    parser.add_argument(
         "-a", "--axial-slices-to-clip", type=int, default=0,
         help="Axial slices to clip.",
     )
@@ -164,10 +168,11 @@ def validate_arguments(args):
     args.fig_path.mkdir(parents=True, exist_ok=True)
     setattr(args, "debug_path", Path(args.output_path) / "debug")
     args.debug_path.mkdir(parents=True, exist_ok=True)
-    setattr(args, "cache_path", Path(args.output_path) / "cache")
-    args.cache_path.mkdir(parents=True, exist_ok=True)
     setattr(args, "mask_path", Path(args.output_path) / "masks")
     args.mask_path.mkdir(parents=True, exist_ok=True)
+    if not hasattr(args, "cache_path"):
+        setattr(args, "cache_path", Path(args.output_path) / "cache")
+    args.cache_path.mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
     print("regions:", args.regions)
@@ -265,7 +270,7 @@ def clust_er176(args):
     # Step 1. Run two-step k-means clustering
 
     # TODO: Shiv: For other than vascular clusters, change the cluster_function
-    # TODO: Shiv: and rename the figures below. abcdefg
+    # TODO: Shiv: and rename the figures below.
 
     centroids_step_1, centroids_step_2 = two_step_clustering(
         mci_image,
