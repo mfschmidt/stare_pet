@@ -5,20 +5,14 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import nibabel as nib
-import nilearn.image
 
 from .util import get_tacs, get_images, get_mid_times, get_plasma, \
-    combine_volumes_into_4d
-from .clustering import vascular_clustering, best_of, \
+    combine_volumes_into_4d, image_in_millicuries
+from .clustering import two_step_clustering, best_of, \
     save_centroid_masks
-
-from .partial_volume import correct_partial_volumes
-from .fit_mean_tac import fit_vascular_mean_tac
+from .centroid_heuristics import find_vascular_centroids
 from .plotting import plot_detailed_tacs
-
-# temporary stubs
-from .util import tac_vascular_correction,\
-                  boot_anchor, minimize_cost_function
+from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
 
 
 def get_argument_parser():
@@ -206,9 +200,9 @@ def validate_arguments(args):
     return True
 
 
-def stare(args):
-    """ The stare function validates the execution context,
-        then orchestrates the entire STARE pipeline.
+def vasc_clust_er176(args):
+    """ The vasc_clust_er176 function validates the execution context,
+        then orchestrates execution of the different steps.
 
     :param args: The parsed argparse object
 
@@ -220,7 +214,7 @@ def stare(args):
 
     # Validate out_path argument
     begin_timestamp = datetime.now()
-    logger.info(f"Begin STARE at {begin_timestamp}.")
+    logger.info(f"Begin vasc_clust_er176 at {begin_timestamp}.")
 
     # Read PET data
     tacs = get_tacs(
@@ -232,20 +226,20 @@ def stare(args):
     plasma_tac = get_plasma(
         args.input_path, args.subject
     )
-    if tacs is None:
-        logger.error("Failed to load TACs")
+    if plasma_tac is None:
+        logger.error("Failed to load plasma TAC")
 
     mid_times, ignored_mid_times = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
     )
-    if tacs is None:
-        logger.error("Failed to load TACs")
+    if mid_times is None:
+        logger.error("Failed to load midtimes")
 
     orig_images = get_images(
         args.input_path, args.output_path, args.subject, args.ignore_frames
     )
-    if tacs is None:
-        logger.error("Failed to load TACs")
+    if orig_images is None:
+        logger.error("Failed to load PET image data")
 
     # Step 0. Format PET data
 
@@ -265,77 +259,66 @@ def stare(args):
     cropped_template = cropped_image.slicer[:, :, :, 0]
 
     # PET data should be in units of 'mCi'
-    # If they already are, good, but other units get converted here.
-    if args.pet_units.lower() == "kbq":
-        mci_image = nilearn.image.math_img('a / 37000', a=cropped_image)
-    elif args.pet_units.lower() == "bq":
-        mci_image = nilearn.image.math_img('a / 37000000', a=cropped_image)
-    else:
-        mci_image = cropped_image
+    mci_image = image_in_millicuries(cropped_image, args.pet_units)
 
+    # -------------------------------------------------------------------------
     # Step 1. Run two-step vascular k-means clustering
 
-    centroids_step_1, centroids_step_2 = vascular_clustering(
-        mci_image, args.output_path,
+    centroids_step_1, centroids_step_2 = two_step_clustering(
+        mci_image,
+        step_one_ks=list(range(6, 40, 4)),
+        step_two_ks=[4, ],
         mid_times=mid_times,
+        cache_path=args.cache_path,
+        cluster_function=find_vascular_centroids,
         force=args.force,
         verbose=args.verbose
     )
+    # Plot the TACs from the first k-means step
+    fig = plot_vascular_tacs(centroids_step_1)
+    fig.savefig(args.fig_path / "step_1_vascular_tacs.png")
+    fig = plot_vascular_tacs(centroids_step_2)
+    fig.savefig(args.fig_path / "step_2_vascular_tacs.png")
+
+    if args.verbose > 1:
+        # These data can be used to build custom plots or otherwise explore.
+        tacs_to_plottable_dataframe(centroids_step_1).to_csv(
+            args.debug_path / "step_1_centroids.csv"
+        )
+        logger.debug(f"WROTE step_1_centroids.csv to {str(args.debug_path)}")
+        tacs_to_plottable_dataframe(centroids_step_2).to_csv(
+            args.debug_path / "step_2_centroids.csv"
+        )
+        logger.debug(f"WROTE step_2_centroids.csv to {str(args.debug_path)}")
+
     best_centroid_step_1 = best_of(centroids_step_1)
     best_centroid_step_2 = best_of(centroids_step_2)
     for centroid_list in [centroids_step_1, centroids_step_2, ]:
-        write_centroid_masks(
+        best_atlas = save_centroid_masks(
             centroid_list, args.output_path / "masks",
             cropped_template, combined_template,
             axial_slices_to_clip=args.axial_slices_to_clip,
             verbose=args.verbose
         )
-
-    # Step 2. Correct partial volumes from vascular clustering
-
-    pvc_mean_centroid = correct_partial_volumes(
-        orig_images,
-        args.fwhm,
-        args.output_path,
-        best_centroid_step_2,
-        mid_times=mid_times,
-    )
+    if best_atlas is None:
+        logger.error("Could not determine best centroid, cannot continue PVC.")
+        sys.exit(1)
 
     # Paint a picture of progress so far
-    fig_path = args.output_path / "figures"
-    fig_path.mkdir(parents=True, exist_ok=True)
     fig_top_tacs = plot_detailed_tacs(
         data=[
-            best_centroid_step_1, best_centroid_step_2, pvc_mean_centroid, plasma_tac,
+            best_centroid_step_1, best_centroid_step_2, plasma_tac,
         ],
-        title=f"Subject {args.subject} Vascular TACs",
+        title=f"Subject {args.subject} Best Cluster TACs",
         palette={
             best_centroid_step_1.name: "blue",
             best_centroid_step_2.name: "red",
-            pvc_mean_centroid.name: "orange",
             plasma_tac.name: "green",
         },
     )
-    fig_top_tacs.savefig(fig_path / "four_tacs.png")
+    fig_top_tacs.savefig(args.fig_path / "best_cluster_tacs.png")
 
-    # Correct TACs by extracting the mean signal from each cluster
-    # Needs to know about ignored mid-times to weight durations appropriately
-    fit_tac = fit_vascular_mean_tac(pvc_mean_centroid, ignored_mid_times, fig_path)
-
-    # Then apply vascular correction
-    rslt1 = tac_vascular_correction(pvc_mean_centroid)
-
-    # Bootstrap signal in PVCed vasculature to generate input functions
-    rslt2 = boot_anchor(pvc_mean_centroid)
-
-    # Minimize the cost function
-    rslt3 = minimize_cost_function(fit_tac)
-
-    # Since all functions are stubs, just keep python's
-    # linters happy by using the rslts
-    logger.debug(f"Ignore: {type(rslt1)}, {type(rslt2)}, {type(rslt3)}")
-
-    # Validate out_path argument
+    # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
     logger.info(f"STARE is finished at {finish_timestamp}.")
     logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")
