@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 import nibabel as nib
 
-from .util import get_tacs, get_images, get_mid_times, get_plasma, \
+# Deleted get_plasma and other mentions of plasma throughout
+from .util import get_tacs, get_images, get_mid_times, \
     combine_volumes_into_4d, image_in_millicuries
 from .clustering import two_step_clustering, best_of, \
     save_centroid_masks
@@ -159,10 +160,14 @@ def validate_arguments(args):
             msg = f"The output_path '{str(args.output_path)}' is not writable."
             errors.append(msg)
         os.remove(tmp_file)
-    (args.output_path / "debug").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "cache").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "figures").mkdir(parents=True, exist_ok=True)
-    (args.output_path / "masks").mkdir(parents=True, exist_ok=True)
+    setattr(args, "fig_path", Path(args.output_path) / "figures")
+    args.fig_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "debug_path", Path(args.output_path) / "debug")
+    args.debug_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "cache_path", Path(args.output_path) / "cache")
+    args.cache_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "mask_path", Path(args.output_path) / "masks")
+    args.mask_path.mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
     print("regions:", args.regions)
@@ -223,11 +228,6 @@ def clust_er176(args):
     if tacs is None:
         logger.error("Failed to load TACs")
 
-    plasma_tac = get_plasma(
-        args.input_path, args.subject
-    )
-    if plasma_tac is None:
-        logger.error("Failed to load plasma TAC")
 
     mid_times, ignored_mid_times = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
@@ -265,11 +265,11 @@ def clust_er176(args):
     # Step 1. Run two-step k-means clustering
 
     # TODO: Shiv: For other than vascular clusters, change the cluster_function
-    # TODO: Shiv: and rename the figures below.
+    # TODO: Shiv: and rename the figures below. abcdefg
 
     centroids_step_1, centroids_step_2 = two_step_clustering(
         mci_image,
-        step_one_ks=list(range(6, 40, 4)),
+        step_one_ks=[30, ], # change to 30
         step_two_ks=[4, ],
         mid_times=mid_times,
         cache_path=args.cache_path,
@@ -310,13 +310,12 @@ def clust_er176(args):
     # Paint a picture of progress so far
     fig_top_tacs = plot_detailed_tacs(
         data=[
-            best_centroid_step_1, best_centroid_step_2, plasma_tac,
+            best_centroid_step_1, best_centroid_step_2,
         ],
         title=f"Subject {args.subject} Best Cluster TACs",
         palette={
             best_centroid_step_1.name: "blue",
-            best_centroid_step_2.name: "red",
-            plasma_tac.name: "green",
+            best_centroid_step_2.name: "red"
         },
     )
     fig_top_tacs.savefig(args.fig_path / "best_cluster_tacs.png")
