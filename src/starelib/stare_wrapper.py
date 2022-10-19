@@ -15,11 +15,8 @@ from .centroid_heuristics import find_vascular_centroids
 from .partial_volume import correct_partial_volumes
 from .fit_mean_tac import fit_vascular_mean_tac
 from .plotting import plot_detailed_tacs
-from .vascular_correction import tac_vascular_correction
+# from .vascular_correction import tac_vascular_correction
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
-
-# temporary stubs
-from .util import boot_anchor, minimize_cost_function
 
 
 def get_argument_parser():
@@ -352,21 +349,21 @@ def stare(args):
     fit_tac = fit_vascular_mean_tac(pvc_mean_tac, ignored_mid_times, args.fig_path)
 
     # Then apply vascular correction
-    rslt1 = tac_vascular_correction(tacs, args.regions, None, fit_tac)
+    # rslt1 = tac_vascular_correction(tacs, args.regions, None, fit_tac)
 
     # Bootstrap signal in PVCed vasculature to generate input functions
-    rslt2 = boot_anchor(rslt1)
+    # rslt2 = boot_anchor(rslt1)
 
     # Minimize the cost function
-    rslt3 = minimize_cost_function(fit_tac)
+    # rslt3 = minimize_cost_function(fit_tac)
 
     # Since all functions are stubs, just keep python's
     # linters happy by using the rslts
-    logger.debug(f"Ignore: {type(rslt1)}, {type(rslt2)}, {type(rslt3)}")
+    # logger.debug(f"Ignore: {type(rslt1)}, {type(rslt2)}, {type(rslt3)}")
 
     # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
     logger.info(f"STARE is finished at {finish_timestamp}.")
     logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")
 
-    return 0
+    return fit_tac is None
