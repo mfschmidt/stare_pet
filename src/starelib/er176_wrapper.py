@@ -265,7 +265,7 @@ def clust_er176(args):
     # Step 1. Run two-step k-means clustering
 
     # TODO: Shiv: For other than vascular clusters, change the cluster_function
-    # TODO: Shiv: and rename the figures below.
+    # TODO: Shiv: and rename the figures below. abcdefg
 
     centroids_step_1, centroids_step_2 = two_step_clustering(
         mci_image,
