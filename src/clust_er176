@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-""" vasc_clust_er176
+""" clust_er176
 
     This is a command-line interface to the stare_pet library and pipeline.
 
@@ -8,7 +8,7 @@
     from the command line.
 """
 
-from starelib.er176_wrapper import get_argument_parser, validate_arguments, vasc_clust_er176
+from starelib.er176_wrapper import get_argument_parser, validate_arguments, clust_er176
 
 
 def main(args):
@@ -20,7 +20,7 @@ def main(args):
     # right, it will return False, and we will quit rather than
     # attempting to run with bad input.
     if validate_arguments(args):
-        return vasc_clust_er176(args)
+        return clust_er176(args)
     else:
         return 1
 

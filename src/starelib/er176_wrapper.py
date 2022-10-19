@@ -200,8 +200,8 @@ def validate_arguments(args):
     return True
 
 
-def vasc_clust_er176(args):
-    """ The vasc_clust_er176 function validates the execution context,
+def clust_er176(args):
+    """ The clust_er176 function validates the execution context,
         then orchestrates execution of the different steps.
 
     :param args: The parsed argparse object
@@ -214,7 +214,7 @@ def vasc_clust_er176(args):
 
     # Validate out_path argument
     begin_timestamp = datetime.now()
-    logger.info(f"Begin vasc_clust_er176 at {begin_timestamp}.")
+    logger.info(f"Begin clust_er176 at {begin_timestamp}.")
 
     # Read PET data
     tacs = get_tacs(
@@ -262,7 +262,10 @@ def vasc_clust_er176(args):
     mci_image = image_in_millicuries(cropped_image, args.pet_units)
 
     # -------------------------------------------------------------------------
-    # Step 1. Run two-step vascular k-means clustering
+    # Step 1. Run two-step k-means clustering
+
+    # TODO: Shiv: For other than vascular clusters, change the cluster_function
+    # TODO: Shiv: and rename the figures below.
 
     centroids_step_1, centroids_step_2 = two_step_clustering(
         mci_image,
