@@ -62,15 +62,22 @@ def get_tsv_data(input_path, subject_id, contents):
     return data
 
 
-def get_tacs(input_path, subject_id):
+def get_tacs(input_path, subject_id, frames_to_ignore=None):
     """ Find a tacs file and read its data
 
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
+    :param iterable frames_to_ignore: rows to drop from the loaded TACs
     :return pandas.DataFrame: TACs
     """
 
-    return get_tsv_data(input_path, subject_id, "tacs")
+    tac_df = get_tsv_data(input_path, subject_id, "tacs")
+    if frames_to_ignore is not None and len(frames_to_ignore) > 0:
+        return tac_df.drop(
+            np.asarray(frames_to_ignore) - 1, axis=0
+        )
+    else:
+        return tac_df
 
 
 def get_plasma(input_path, subject_id):
@@ -282,14 +289,20 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
 def characterize_mid_times(mid_times, missing_mid_times=None, beginning=0.0):
     """ From an array of timing mid-points, return durations and end points.
 
-        This is just a stub function to examine sphinx, autodocumentation,
-        and import paths.
+        We are typically provided a list of mid-times representing the time
+        of each PET acquisition. But PET volumes are acquired with
+        different amounts of time between each one, so the TAC is not
+        sampled linearly. We can use those mid-times to also
+        calculate how much time span each volume represents when the
+        scans are spaced differently. This function calculates those data
+        and returns a pandas dataframe containing them for each point
+        in time.
 
         :param Iterable mid_times: A list or array of timing midpoints.
         :param Iterable missing_mid_times: left out timing midpoints.
         :param float beginning: Assumed 0.0, when the first mid-time started
 
-        :return: endpoints, durations, weights
+        :return pandas.DataFrame: data about each time point in mid_times
     """
 
     # Finalize the complete mid_times vector
