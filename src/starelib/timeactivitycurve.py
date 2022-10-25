@@ -13,8 +13,8 @@ class TimeActivityCurve:
         """ Centroid constructor """
 
         # Specified properties
-        self.activity = activity  # ndarray shaped like (25,)
-        self.timepoints = timepoints  # ndarray shaped like (1000000,)
+        self.activity = np.asarray(activity)  # ndarray shaped like (25,)
+        self.timepoints = np.asarray(timepoints)  # ndarray shaped like (1000000,)
         self.source = source  # where did this centroid come from
         self.name = name  # what I should call this TAC in a figure legend
 
