@@ -2,6 +2,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
+import numpy as np
+from pathlib import Path
 
 from .timeactivitycurve import TimeActivityCurve
 
@@ -221,5 +223,101 @@ def plot_detailed_tacs(data, title=None, palette=None, color_filter=None):
     fig.suptitle(f"Optimal vascular TACs" if title is None else title)
     # Do NOT use tight_layout; it carves out extra space for the legend
     # fig.tight_layout()
+
+    return fig
+
+
+def plot_tac_fits(fit_data, param_data, title="", figsize=(8, 5), save_to=None):
+    """ Plot the fits contained in the dict. """
+
+    # Plot results for analysis
+    fig, axes = plt.subplots(figsize=figsize)
+    if "fit_1" in fit_data and "params_1" in param_data:
+        sse_1 = np.sum(np.square(fit_data['y'] - fit_data['fit_1']))
+        eq_1 = r"$" + f"{param_data['params_1'][0]:0.3f}" + \
+               r"e^{-" + f"{param_data['params_1'][1]:0.3f}" + \
+               r"}$"
+        label_1 = f"P1. {eq_1}  (sse = {sse_1:0.3f})"
+        sns.lineplot(data=fit_data, x="t", y="fit_1", label=label_1, ax=axes)
+    if "fit_2" in fit_data and "params_2" in param_data:
+        sse_2 = np.sum(np.square(fit_data['y'] - fit_data['fit_2']))
+        eq_2 = r"$" + f"{param_data['params_2'][0]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_2'][1]:0.3f}" + \
+               r"} + " + f"{param_data['params_2'][2]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_2'][3]:0.3f}" + \
+               r"}$"
+        label_2 = f"P2. {eq_2}  (sse = {sse_2:0.3f})"
+        sns.lineplot(data=fit_data, x="t", y="fit_2", label=label_2, ax=axes)
+    if "fit_3" in fit_data and "params_3" in param_data:
+        sse_3 = np.sum(np.square(fit_data['y'] - fit_data['fit_3']))
+        eq_3 = r"$" + f"{param_data['params_3'][0]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_3'][1]:0.3f}" + \
+               r"} + " + f"{param_data['params_3'][2]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_3'][3]:0.3f}" + \
+               r"} + " + f"{param_data['params_3'][4]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_3'][5]:0.3f}" + \
+               r"}$"
+        label_3 = f"P3. {eq_3}  (sse = {sse_3:0.3f})"
+        sns.lineplot(data=fit_data, x="t", y="fit_3", label=label_3, ax=axes)
+    if "fit_original" in fit_data and "params_original" in param_data:
+        sse_o = np.sum(np.square(fit_data['y'] - fit_data['fit_original']))
+        eq_o = r"$" + f"{param_data['params_original'][0]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_original'][1]:0.3f}" + \
+               r"} + " + f"{param_data['params_original'][2]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_original'][3]:0.3f}" + \
+               r"} + " + f"{param_data['params_original'][4]:0.3f}" + r"e^{-" + \
+               f"{param_data['params_original'][5]:0.3f}" + \
+               r"}$"
+        label_o = f"ML. {eq_o}  (sse = {sse_o:0.3f})"
+        sns.lineplot(data=fit_data, x="t", y="fit_original",
+                     label=label_o, linestyle=":", ax=axes)
+    sns.scatterplot(data=fit_data, x="t", y="y", label="data", color='black', ax=axes)
+    axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=1)
+    axes.set_title(title)
+    fig.tight_layout()
+
+    if save_to is not None and Path(save_to).parent.exists():
+        fig.savefig(Path(save_to))
+
+    return fig
+
+
+def plot_before_and_after_tacs(
+        before_tacs, after_tacs, mid_times,
+        title="", figsize=(8, 5), save_to=None
+):
+    """ Plot two versions of each TAC.
+
+        This function has never been completed or used, but was left as a stub
+        if it needs implementation in the future.
+
+        :param DataFrame before_tacs: TACs before modification, plotted dotted
+        :param DataFrame after_tacs: TACs after modification, plotted solid
+        :param iterable mid_times: Time indices for rows in TACs
+        :param str title: The title of the figure
+        :param tuple figsize: The figure's height and width, in inches
+        :param Path save_to: If provided, figure will be saved to this path
+        :return: matplotlib figure
+    """
+
+    # Plot results for analysis
+    fig, axes = plt.subplots(figsize=figsize)
+
+    df_mid_times = pd.DataFrame({"t": mid_times})
+    df_before = pd.concat([df_mid_times, before_tacs, ], axis=1).melt(
+        id_vars="t"
+    ).rename(columns={"variable": "region", "value": "activity"})
+    df_after = pd.concat([df_mid_times, after_tacs, ], axis=1).melt(
+        id_vars="t"
+    ).rename(columns={"variable": "region", "value": "activity"})
+
+    sns.lineplot(data=df_before, x="t", y="activity", hue="region", legend=None, linestyle=":")
+    sns.lineplot(data=df_after, x="t", y="activity", hue="region")
+
+    axes.set_title(title)
+    fig.tight_layout()
+
+    if save_to is not None and Path(save_to).parent.exists():
+        fig.savefig(Path(save_to))
 
     return fig
