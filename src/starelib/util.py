@@ -62,22 +62,24 @@ def get_tsv_data(input_path, subject_id, contents):
     return data
 
 
-def get_tacs(input_path, subject_id, frames_to_ignore=None):
+def get_tacs(input_path, subject_id, regions, frames_to_ignore=None):
     """ Find a tacs file and read its data
 
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
+    :param iterable regions: list of regions to include from loaded TACs
     :param iterable frames_to_ignore: rows to drop from the loaded TACs
     :return pandas.DataFrame: TACs
     """
 
     tac_df = get_tsv_data(input_path, subject_id, "tacs")
+    good_regions = [r for r in regions if r in tac_df.columns]
     if frames_to_ignore is not None and len(frames_to_ignore) > 0:
         return tac_df.drop(
             np.asarray(frames_to_ignore) - 1, axis=0
-        )
+        )[good_regions]
     else:
-        return tac_df
+        return tac_df[good_regions]
 
 
 def get_plasma(input_path, subject_id):

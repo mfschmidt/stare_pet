@@ -5,18 +5,20 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import nibabel as nib
-import pickle
+import pandas as pd
+# import pickle
 
 from .util import get_tacs, get_images, get_mid_times, get_plasma, \
-    combine_volumes_into_4d, image_in_millicuries
+                  combine_volumes_into_4d, image_in_millicuries
 from .clustering import two_step_clustering, best_of, \
-    save_centroid_masks
+                        save_centroid_masks
 from .centroid_heuristics import find_vascular_centroids
 from .partial_volume import correct_partial_volumes
 from .fit_mean_tac import fit_vascular_mean_tac
 from .plotting import plot_detailed_tacs
-# from .vascular_correction import tac_vascular_correction
-from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
+from .vascular_correction import tac_vascular_correction
+from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs, \
+                      plot_before_and_after_tacs
 
 
 def get_argument_parser():
@@ -36,6 +38,10 @@ def get_argument_parser():
     parser.add_argument(
         "-o", "--output-path", type=Path, default=".",
         help="The path for output files",
+    )
+    parser.add_argument(
+        "--cache-path", type=Path,
+        help="Fast local storage for caching interim data",
     )
     parser.add_argument(
         "-a", "--axial-slices-to-clip", type=int, default=0,
@@ -64,7 +70,7 @@ def get_argument_parser():
     )
     parser.add_argument(
         "--ignore-frames", type=int, nargs="+",
-        help="Any frames listed with this argument will be ignored ",
+        help="Any frames listed with this argument will be ignored",
     )
     parser.add_argument(
         "--regions", type=str, nargs="+",
@@ -167,16 +173,17 @@ def validate_arguments(args):
     args.fig_path.mkdir(parents=True, exist_ok=True)
     setattr(args, "debug_path", Path(args.output_path) / "debug")
     args.debug_path.mkdir(parents=True, exist_ok=True)
-    setattr(args, "cache_path", Path(args.output_path) / "cache")
-    args.cache_path.mkdir(parents=True, exist_ok=True)
     setattr(args, "mask_path", Path(args.output_path) / "masks")
     args.mask_path.mkdir(parents=True, exist_ok=True)
+    if (not hasattr(args, "cache_path")) or (args.cache_path is None):
+        setattr(args, "cache_path", Path(args.output_path) / "cache")
+    args.cache_path.mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
     print("regions:", args.regions)
     if args.regions is None:
         # If not specified, use a default bucket of regions.
-        setattr(args, "regions", ['cerfullcs_c', 'cin', 'hip', 'par', 'pfc', 'pip', ])
+        setattr(args, "regions", ['cerfullcs_c', 'cin', 'hip', 'par', 'pfc1_left', 'pip', ])
         # msg = f"No regions are specified; there's nothing to be done."
         # errors.append(msg)
     else:
@@ -226,10 +233,20 @@ def stare(args):
 
     # Read PET data
     tacs = get_tacs(
-        args.input_path, args.subject
+        args.input_path, args.subject, args.regions, args.ignore_frames
     )
     if tacs is None:
         logger.error("Failed to load TACs")
+        regions = None
+    else:
+        if len(tacs.columns) < len(args.regions):
+            dropped_regions = [r for r in args.regions if r not in tacs.columns]
+            logger.warning("Specified regions were NOT found in the TACs:")
+            for region in dropped_regions:
+                logger.warning(f"   {region}")
+        regions = tacs.columns
+        logger.warning(f"Running with {len(regions)} regions:"
+                       f"    [{', '.join(regions)}]")
 
     plasma_tac = get_plasma(
         args.input_path, args.subject
@@ -243,6 +260,8 @@ def stare(args):
     if mid_times is None:
         logger.error("Failed to load midtimes")
 
+    # I'd like to avoid this and just load one 4D image, but the PVC later
+    # requires each image independently, so we persist with loading them all.
     orig_images = get_images(
         args.input_path, args.output_path, args.subject, args.ignore_frames
     )
@@ -288,18 +307,15 @@ def stare(args):
     fig = plot_vascular_tacs(centroids_step_2)
     fig.savefig(args.fig_path / "step_2_vascular_tacs.png")
 
-    if args.verbose > 1:
-        # These data can be used to build custom plots or otherwise explore.
-        tacs_to_plottable_dataframe(centroids_step_1).to_csv(
-            args.debug_path / "step_1_centroids.csv"
-        )
-        logger.debug(f"WROTE step_1_centroids.csv to {str(args.debug_path)}")
-        tacs_to_plottable_dataframe(centroids_step_2).to_csv(
-            args.debug_path / "step_2_centroids.csv"
-        )
-        logger.debug(f"WROTE step_2_centroids.csv to {str(args.debug_path)}")
-
-
+    # These data can be used to build custom plots or otherwise explore.
+    tacs_to_plottable_dataframe(centroids_step_1).to_csv(
+        args.output_path / "step_1_kmeans_tac.csv"
+    )
+    logger.info(f"WROTE step_1_kmeans_tac.csv to {str(args.output_path)}")
+    tacs_to_plottable_dataframe(centroids_step_2).to_csv(
+        args.output_path / "step_2_kmeans_tac.csv"
+    )
+    logger.info(f"WROTE step_2_kmeans_tac.csv to {str(args.output_path)}")
 
     best_centroid_step_1 = best_of(centroids_step_1)
     best_centroid_step_2 = best_of(centroids_step_2)
@@ -325,8 +341,10 @@ def stare(args):
         mid_times=mid_times,
         verbose=args.verbose,
     )
-    if args.verbose > 1:
-        pickle.dump(pvc_mean_tac, open(args.debug_path / "pvc_mean_tac.pkl", "wb"))
+    tacs_to_plottable_dataframe([pvc_mean_tac, ]).to_csv(
+        args.output_path / "step_3_pvc_mean_tac.csv"
+    )
+    logger.info(f"WROTE step_3_pvc_mean_tac.csv to {str(args.output_path)}")
 
     # Paint a picture of progress so far
     fig_top_tacs = plot_detailed_tacs(
@@ -346,10 +364,21 @@ def stare(args):
     # -------------------------------------------------------------------------
     # Step 3. Correct TACs by extracting the mean signal from each cluster
     # Needs to know about ignored mid-times to weight durations appropriately
-    fit_tac = fit_vascular_mean_tac(pvc_mean_tac, ignored_mid_times, args.fig_path)
+    fit_tac = fit_vascular_mean_tac(
+        pvc_mean_tac, ignored_mid_times, args.fig_path,
+        debug_path=args.debug_path, verbose=args.verbose,
+    )
 
     # Then apply vascular correction
-    # rslt1 = tac_vascular_correction(tacs, args.regions, None, fit_tac)
+    # vasc_corr_perc was hard-coded to 5 in the matlab wrapperStare.m
+    corrected_tacs = tac_vascular_correction(
+        tacs, regions, args.vasc_corr_pct, fit_tac
+    )
+    corrected_tacs.to_csv(args.debug_path / "corrected_tacs.tsv", index=None, sep='\t')
+    fig = plot_before_and_after_tacs(
+        tacs, corrected_tacs, mid_times,
+        save_to=args.fig_path / "vascular_corrected_tacs.png"
+    )
 
     # Bootstrap signal in PVCed vasculature to generate input functions
     # rslt2 = boot_anchor(rslt1)
@@ -357,13 +386,9 @@ def stare(args):
     # Minimize the cost function
     # rslt3 = minimize_cost_function(fit_tac)
 
-    # Since all functions are stubs, just keep python's
-    # linters happy by using the rslts
-    # logger.debug(f"Ignore: {type(rslt1)}, {type(rslt2)}, {type(rslt3)}")
-
     # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
     logger.info(f"STARE is finished at {finish_timestamp}.")
     logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")
 
-    return fit_tac is None
+    return 0 if isinstance(corrected_tacs, pd.DataFrame) else 1
