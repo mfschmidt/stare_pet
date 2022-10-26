@@ -4,6 +4,13 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.2.0, 2022-10-26
+
+- Implemented through vascular correction
+- Significantly enhanced curve fitting capabilities
+- When loading TACs, keep only the regions specified
+- Did many comparisons with matlab output
+
 Version 0.1.6, 2022-10-10
 
 - Full refactor to make functions more generalist
