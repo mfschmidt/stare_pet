@@ -103,7 +103,7 @@ def save_centroid_masks(centroids, mask_output_path,
         :param int axial_slices_to_clip: how many axial slices to remove
         :param int verbose: higher numbers indicate more verbosity
 
-        :return: Best atlas image, in original uncropped space
+        :return nibabel.Nifti1Image: the best atlas image, in original space
     """
 
     best_atlas = None
