@@ -1,111 +1,11 @@
 import numpy as np
-import logging
-import random
 import pickle
-from scipy.optimize import curve_fit
+import logging
 from scipy.interpolate import interp1d, PchipInterpolator
 
-from .util import characterize_mid_times
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_detailed_tacs
-
-
-def root_mean_square(actual, predicted):
-    """ Return the RMS error between actual and predicted values.
-
-        :param ndarray actual: Measured values
-        :param ndarray predicted: Predicted or modeled values
-        :returns: Root sum of squared error
-    """
-
-    return np.sqrt(np.sum((actual - predicted)**2))
-
-
-def find_curve_fits(f, x, y,
-                    sigmas=None, success_limit=10, failure_limit=8192):
-    """ Find several options for fitting data to our model.
-
-        :param function f: the curve to fit, returns a y for any x
-        :param ndarray x: actual x values to fit
-        :param ndarray y: actual y values to fit
-        :param ndarray sigmas: Optionally, provide uncertainty as SD
-        :param success_limit: How many fits should be found and returned
-        :param failure_limit: How many failures before we give up
-        :return: a list of dicts, each representing one fit curve
-    """
-
-    logger = logging.getLogger("STARE")
-
-    # Fit repeatedly until we have ten successes or complete failure.
-    successes = []
-    num_successes, num_failures, num_attempts = 0, 0, 0
-    while len(successes) < success_limit and num_failures < failure_limit:
-        np.random.seed = 42 * (num_failures + 7)
-        p0 = get_initial_parameters(6)
-        num_attempts += 1
-        try:
-            # Fit the data to the model, returning parameters and covariance.
-            retval = curve_fit(
-                f, x, y, p0=p0, method='lm', maxfev=4096,
-                sigma=sigmas, absolute_sigma=(sigmas is not None),
-                full_output=True
-            )
-            fit_parameters = retval[0]
-            fit = f(x, *fit_parameters)
-            residuals = (y - fit)
-            rms = root_mean_square(y, fit)
-            if sigmas is None:
-                weighted_error = np.sum(residuals**2)
-            else:
-                weighted_error = np.sum((1 / np.sqrt(sigmas)) * residuals**2)
-
-            # There are many ways for these fits to be shit.
-            # They can throw an exception, usually due to overflows, which
-            # indicate pretty far-out values we don't want. Or they can have
-            # infinite variance or NaN values. Those actually converge,
-            # but are still worthless. Count all of them as failures.
-            # So far, normal sums of squared errors would be greater
-            # than zero, and less than 1. Anything over 10 is truly missing
-            # the curve and can be dismissed as failure.
-            if np.isnan(retval[0]).any() or np.isnan(retval[1]).any():
-                num_failures += 1
-                logger.info("a curve fit converged, but converged to NaN, "
-                            f"failure {num_failures} for this model, "
-                            f"{len(successes)} successes.")
-            elif np.isinf(retval[0]).any() or np.isinf(retval[1]).any():
-                num_failures += 1
-                logger.info("a curve fit converged, but converged to infinity, "
-                            f"failure {num_failures} for this model, "
-                            f"{len(successes)} successes.")
-            elif weighted_error > 10.0:
-                num_failures += 1
-                logger.info("a curve fit converged, but weighted error of "
-                            f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
-                            f"failure {num_failures} for this model, "
-                            f"{len(successes)} successes.")
-            else:
-                num_successes += 1
-                successes.append({
-                    "parameters": fit_parameters,
-                    "covariance": retval[1],
-                    "residuals": residuals,
-                    "fit": fit,
-                    "rms": rms,
-                    "wrms": weighted_error,
-                })
-        except RuntimeError:
-            num_failures += 1
-            logger.info("a curve fit failed to converge, "
-                        f"failure {num_failures} for this model, "
-                        f"{len(successes)} successes.")
-            # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
-            # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
-
-    logger.info(f"Of {num_attempts} attempts, "
-                f"{num_successes} converged and "
-                f"{num_failures} failed to converge.")
-
-    return successes
+from .fitting_models import decay_model, find_curve_fits
 
 
 def select_best_fit(fits, weighted=True):
@@ -127,37 +27,8 @@ def select_best_fit(fits, weighted=True):
     return best_fit
 
 
-def get_initial_parameters(n=6, init_params=None):
-    """ Use init_params, if provided, and randomize other parameters.
-
-        :param int n: how many parameters to return
-        :param list init_params: Specified parameters to use
-        :return: list of parameters
-    """
-
-    # What range should coefficients be randomized within?
-    coef_range = (0.0, 128.0)
-    exp_range = (-2.0, 10.0)
-
-    # Coefficients should be positive, and can be large.
-    random_coefficients = [random.uniform(*coef_range) for _ in range(n)]
-    # Exponents may be negative, but should start small.
-    random_exponents = [random.uniform(*exp_range) for _ in range(n)]
-
-    parameters = []
-    for i in range(n):
-        if init_params is not None and i < len(init_params):
-            parameters.append(init_params[i])
-        else:
-            if i % 2 == 0:
-                parameters.append(random_coefficients[i])
-            else:
-                parameters.append(random_exponents[i])
-
-    return parameters
-
-
-def interpolate_full_tac(actual_tac, best_fit, model, tac_name="high res decay model"):
+def interpolate_full_tac(actual_tac, best_fit, model,
+                         tac_name="high res decay model"):
     """ Interpolate pre- and post-peak separately and return combined TAC.
 
         Actual time points are sparse and spread out non-linearly, but it
@@ -205,10 +76,10 @@ def interpolate_full_tac(actual_tac, best_fit, model, tac_name="high res decay m
 
     # Concatenate pre- and post- peak into one full-length TAC
     high_res_tac = TimeActivityCurve(
-        timepoints=all_uniform_t,
         activity=np.concatenate([
             pre_peak_uniform_fit, post_peak_uniform_fit,
         ]),
+        timepoints=all_uniform_t,
         source="interpolation",
         name=tac_name,
     )
@@ -217,11 +88,11 @@ def interpolate_full_tac(actual_tac, best_fit, model, tac_name="high res decay m
     pchip_interpolator = PchipInterpolator(
         high_res_tac.timepoints, high_res_tac.activity,
     )
-    original_mid_times = np.asarray(actual_tac.timepoints)
 
     orig_res_tac = TimeActivityCurve(
-        timepoints=original_mid_times,
-        activity=pchip_interpolator(original_mid_times),
+        timepoints=actual_tac.timepoints,
+        activity=pchip_interpolator(actual_tac.timepoints),
+        missing_timepoints=actual_tac.missing_timepoints,
         source="decay_model",
         name="original res decay model",
     )
@@ -229,43 +100,18 @@ def interpolate_full_tac(actual_tac, best_fit, model, tac_name="high res decay m
     return orig_res_tac, high_res_tac
 
 
-# Define a model to use for fitting and interpolation of decay.
-# We need to map from x (timepoints, stored in post_peak_mid_times)
-# to y (activity, stored in post_peak_activity),
-# where x and y are each a vector (numpy.ndarray) of about 21 floats.
-# From the TAC's peak activity onward, we anticipate exponential decay,
-# a steep then gradual decline asymptoting to near zero.
-# This curve can be generally described by y=e**(-x)
-def decay_model(x, c1, lambda1, c2, lambda2, c3, lambda3):
-    """ Use e**(-x) as an exponential decay motif, but stack three of them,
-        each with a different coefficient (magnitude shift)
-        and lambda (steepener)
-    """
-    y = (c1 * np.exp(-1.0 * lambda1 * x)) + \
-        (c2 * np.exp(-1.0 * lambda2 * x)) + \
-        (c3 * np.exp(-1.0 * lambda3 * x))
-    return y
-
-
-def decay_model_1(xs, c1, lambda1):
-    return c1 * np.exp(-1.0 * lambda1 * xs)
-
-
-def decay_model_2(xs, c1, lambda1, c2, lambda2):
-    return (c1 * np.exp(-1.0 * lambda1 * xs)) + \
-           (c2 * np.exp(-1.0 * lambda2 * xs))
-
-
 def fit_vascular_mean_tac(
-        vascular_tac, missing_mid_times, figure_path,
-        debug_path=None, verbose=1
+        pvc_tac, figure_path,
+        debug_path=None, cache_path=None, force=False,
+        verbose=1
 ):
     """ Fit vascular mean TAC
 
-        :param TimeActivityCurve vascular_tac: The best TAC thus far (from PVC)
-        :param np.ndarray missing_mid_times: Mid-times missing from vascular_tac
+        :param TimeActivityCurve pvc_tac: The best TAC thus far (from PVC)
         :param Path figure_path: The path for saving out figures
         :param Path debug_path: The path for saving out debug information
+        :param Path cache_path: The path for saving out cached data
+        :param bool force: Set to true to override caches and recalculate
         :param int verbose: Set to non-zero to trigger logging, higher is more
 
         :returns: TAC from weighted model fit
@@ -291,14 +137,17 @@ def fit_vascular_mean_tac(
     )
     """
 
+    """
     # Calculate timing blocks
     # Weights are calculated on the duration of each block of time in
     # the TAC, but the duration must be calculated on ALL blocks, even
     # if ignored, because the duration is unknown if the block before
     # or after was removed.
     time_blocks = characterize_mid_times(
-        vascular_tac.timepoints, missing_mid_times=missing_mid_times
+        vascular_tac.timepoints,
+        missing_mid_times=vascular_tac.missing_timepoints
     )
+
     # Get weights (square root of frame duration) for fitting.
     # Original matlab code used 'weights', but python curve fitting
     # uses 'sigmas' instead, so we'll calculate both here, but only
@@ -319,7 +168,8 @@ def fit_vascular_mean_tac(
     post_peak_sigmas = usable_sigmas[peak_activity_index:]
 
     # Just to compare prior buggy results with corrected, do this wrong.
-    bad_blocks = characterize_mid_times(vascular_tac.timepoints)  # no missing mid_times
+    # no missing mid_times are included, so characterization goes bad.
+    bad_blocks = characterize_mid_times(vascular_tac.timepoints)  
     bad_blocks['sigma'] = np.real(1 / np.sqrt(np.sqrt(bad_blocks['duration'])))
     duration_sigmas = time_blocks[
         time_blocks['used']
@@ -330,41 +180,61 @@ def fit_vascular_mean_tac(
     # Fit the data to the decay_model (here we fit three variants of the data)
     for attempt in [
         {"name": "raw", "sigmas": None, },
-        {"name": "bad_weights", "sigmas": bad_blocks['sigma'].values[peak_activity_index:], },
+        {"name": "bad_weights",
+         "sigmas": bad_blocks['sigma'].values[peak_activity_index:], },
         {"name": "sqrt_weights", "sigmas": post_peak_sigmas, },
         {"name": "duration_weights", "sigmas": duration_sigmas, },
     ]:
-        # Fit repeatedly until we have ten successes or complete failure.
-        successes = find_curve_fits(
-            decay_model, post_peak_mid_times, post_peak_activity,
-            sigmas=attempt['sigmas']
-        )
-        if debug_path is not None:
-            pickle.dump(
-                successes,
-                open(debug_path / f"fits_from_{attempt['name']}.pkl", "wb")
-            )
-        best_fit = select_best_fit(successes)
-        lores_tac, hires_tac = interpolate_full_tac(
-            vascular_tac, best_fit, decay_model
-        )
-        lores_tac.name = f"{attempt['name']} model fit"
-        tacs[attempt['name']] = lores_tac
-        hires_tac.name = f"{attempt['name']} model fit"
-        hires_tacs[attempt['name']] = hires_tac
+        pass
+    """
 
-    fig = plot_detailed_tacs([v for k, v in tacs.items()])
-    fig.savefig(figure_path / "compare_model_fits.png")
+    logger = logging.getLogger("STARE")
+
+    if cache_path is not None and cache_path.exists():
+        cache_file = cache_path / "step_3_decay_model_fits.pkl"
+    else:
+        cache_file = None
+    if cache_file is not None and cache_file.exists() and not force:
+        logger.info("  loading cached step 3 decay model fits to save time")
+        successes = pickle.load(cache_file.open("rb"))
+    else:
+        # Fit repeatedly until we have ten successes or complete failure.
+        # Only fitting decay of activity past the peak - not pre-peak rise
+        successes = find_curve_fits(
+            decay_model,
+            pvc_tac.post_peak_timepoints(),
+            pvc_tac.post_peak_activity(),
+            sigmas=pvc_tac.post_peak_sigmas(method='sqrt'),
+            success_limit=10, failure_limit=8192
+        )
+        if cache_file is not None:
+            pickle.dump(successes, cache_file.open("wb"))
+            logger.debug(f"WROTE {cache_file.name} (pickled rate_constants) "
+                         f"to {str(cache_path)}")
+    if debug_path is not None:
+        pickle.dump(
+            successes,
+            open(debug_path / f"fits.pkl", "wb")
+        )
+    best_fit = select_best_fit(successes)
+    lores_tac, hires_tac = interpolate_full_tac(
+        pvc_tac, best_fit, decay_model
+    )
+    lores_tac.name = "decay model fit"
+    lores_tac.sd = pvc_tac.sd
+
+    fig = plot_detailed_tacs([lores_tac, hires_tac])
+    fig.savefig(figure_path / "fits_hi_vs_lo_res.png")
     if verbose > 0 and debug_path is not None:
         pickle.dump(
-            tacs,
-            open(debug_path / f"tacs_dict_from_fitting.pkl", "wb")
+            lores_tac,
+            open(debug_path / f"tac_from_fitting.pkl", "wb")
         )
         pickle.dump(
-            hires_tacs,
-            open(debug_path / f"hires_tacs_dict_from_fitting.pkl", "wb")
+            hires_tac,
+            open(debug_path / f"hires_tac_from_fitting.pkl", "wb")
         )
 
     # Return the one best, properly weighted, interpolated TAC in original res.
     # This can be used to reduce the vascular influence on measured TACs later.
-    return tacs["duration_weights"]
+    return lores_tac, hires_tac
