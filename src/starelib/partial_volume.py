@@ -100,6 +100,7 @@ def correct_partial_volumes(
     post_pvc_tac = TimeActivityCurve(
         activity=np.mean(masked_data, axis=0),
         timepoints=np.array(mid_times),
+        sd=np.std(masked_data, axis=0),
         source="pvc",
         name="pvc",
     )
