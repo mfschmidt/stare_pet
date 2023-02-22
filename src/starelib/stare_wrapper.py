@@ -6,10 +6,10 @@ from datetime import datetime
 from pathlib import Path
 import nibabel as nib
 import pandas as pd
-# import pickle
+import pickle
 
-from .util import get_tacs, get_images, get_mid_times, get_plasma, \
-                  combine_volumes_into_4d, image_in_millicuries
+from .util import combine_volumes_into_4d, image_in_millicuries
+from .loader import get_tacs, get_images, get_mid_times, get_plasma
 from .clustering import two_step_clustering, best_of, \
                         save_centroid_masks
 from .centroid_heuristics import find_vascular_centroids
@@ -19,6 +19,10 @@ from .plotting import plot_detailed_tacs
 from .vascular_correction import tac_vascular_correction
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs, \
                       plot_before_and_after_tacs
+from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
+from .plotting import plot_all_stare_tac_fits
+from .boot_anchor import boot_anchor
+from .minimize_cost import minimize_cost_function
 
 
 def get_argument_parser():
@@ -148,7 +152,8 @@ def validate_arguments(args):
     # Ensure the input location exists, and contains the subject.
     if Path(args.input_path).exists():
         if not (Path(args.input_path) / args.subject).exists():
-            errors.append(f"There is no subject '{args.subject}' at '{args.input_path}'.")
+            errors.append(f"There is no subject '{args.subject}' "
+                          "at '{args.input_path}'.")
     else:
         errors.append(f"The input path, '{args.input_path}' does not exist.")
 
@@ -158,9 +163,11 @@ def validate_arguments(args):
         args.output_path = Path(args.output_path) / args.subject
     if not args.output_path.exists():
         args.output_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Creating '{str(args.output_path)}', which did not exist.")
+        logging.info(f"Creating '{str(args.output_path)}', "
+                     "which did not exist.")
     if not args.output_path.exists():
-        msg = f"The output_path '{str(args.output_path)}' does not exist and I cannot create it."
+        msg = (f"The output_path '{str(args.output_path)}' "
+               "does not exist and I cannot create it.")
         errors.append(msg)
     else:
         tmp_file = args.output_path / "test.tmp"
@@ -183,7 +190,8 @@ def validate_arguments(args):
     print("regions:", args.regions)
     if args.regions is None:
         # If not specified, use a default bucket of regions.
-        setattr(args, "regions", ['cerfullcs_c', 'cin', 'hip', 'par', 'pfc1_left', 'pip', ])
+        setattr(args, "regions",
+                ['cerfullcs_c', 'cin', 'hip', 'par', 'pfc1_left', 'pip', ])
         # msg = f"No regions are specified; there's nothing to be done."
         # errors.append(msg)
     else:
@@ -253,6 +261,10 @@ def stare(args):
     )
     if plasma_tac is None:
         logger.error("Failed to load plasma TAC")
+    pickle.dump(
+        plasma_tac,
+        open(args.output_path / "debug" / "tac_plasma.pkl", "wb")
+    )
 
     mid_times, ignored_mid_times = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
@@ -303,22 +315,30 @@ def stare(args):
     )
     # Plot the TACs from the first k-means step
     fig = plot_vascular_tacs(centroids_step_1)
-    fig.savefig(args.fig_path / "step_1_vascular_tacs.png")
+    fig.savefig(args.fig_path / "step_1a_vascular_tacs.png")
     fig = plot_vascular_tacs(centroids_step_2)
-    fig.savefig(args.fig_path / "step_2_vascular_tacs.png")
+    fig.savefig(args.fig_path / "step_1b_vascular_tacs.png")
 
     # These data can be used to build custom plots or otherwise explore.
     tacs_to_plottable_dataframe(centroids_step_1).to_csv(
-        args.output_path / "step_1_kmeans_tac.csv"
+        args.output_path / "step_1a_kmeans_tac.csv"
     )
-    logger.info(f"WROTE step_1_kmeans_tac.csv to {str(args.output_path)}")
+    logger.info(f"WROTE step_1a_kmeans_tac.csv to {str(args.output_path)}")
     tacs_to_plottable_dataframe(centroids_step_2).to_csv(
-        args.output_path / "step_2_kmeans_tac.csv"
+        args.output_path / "step_1b_kmeans_tac.csv"
     )
-    logger.info(f"WROTE step_2_kmeans_tac.csv to {str(args.output_path)}")
+    logger.info(f"WROTE step_1b_kmeans_tac.csv to {str(args.output_path)}")
 
     best_centroid_step_1 = best_of(centroids_step_1)
+    pickle.dump(
+        best_centroid_step_1,
+        open(args.output_path / "debug" / "tac_kmeans_step_1.pkl", "wb")
+    )
     best_centroid_step_2 = best_of(centroids_step_2)
+    pickle.dump(
+        best_centroid_step_2,
+        open(args.output_path / "debug" / "tac_kmeans_step_2.pkl", "wb")
+    )
     for centroid_list in [centroids_step_1, centroids_step_2, ]:
         best_atlas = save_centroid_masks(
             centroid_list, args.output_path / "masks",
@@ -341,50 +361,106 @@ def stare(args):
         mid_times=mid_times,
         verbose=args.verbose,
     )
-    tacs_to_plottable_dataframe([pvc_mean_tac, ]).to_csv(
-        args.output_path / "step_3_pvc_mean_tac.csv"
+    pvc_mean_tac.missing_timepoints = ignored_mid_times
+    pickle.dump(
+        pvc_mean_tac,
+        open(args.output_path / "debug" / "tac_pvc.pkl", "wb")
     )
-    logger.info(f"WROTE step_3_pvc_mean_tac.csv to {str(args.output_path)}")
+    tacs_to_plottable_dataframe([pvc_mean_tac, ]).to_csv(
+        args.output_path / "step_2_pvc_mean_tac.csv"
+    )
+    logger.info(f"WROTE step_2_pvc_mean_tac.csv to {str(args.output_path)}")
 
     # Paint a picture of progress so far
     fig_top_tacs = plot_detailed_tacs(
         data=[
-            best_centroid_step_1, best_centroid_step_2, pvc_mean_tac, plasma_tac,
+            best_centroid_step_1,
+            best_centroid_step_2,
+            pvc_mean_tac,
+            # plasma_tac,
         ],
         title=f"Subject {args.subject} Vascular TACs",
         palette={
             best_centroid_step_1.name: "blue",
             best_centroid_step_2.name: "red",
             pvc_mean_tac.name: "orange",
-            plasma_tac.name: "green",
+            # plasma_tac.name: "green",
         },
     )
-    fig_top_tacs.savefig(args.fig_path / "four_tacs.png")
+    fig_top_tacs.savefig(args.fig_path / "step_2_four_tacs.png")
 
     # -------------------------------------------------------------------------
-    # Step 3. Correct TACs by extracting the mean signal from each cluster
+    # Step 3. Correct TACs by extracting the mean signal from each cluster.
     # Needs to know about ignored mid-times to weight durations appropriately
-    fit_tac = fit_vascular_mean_tac(
-        pvc_mean_tac, ignored_mid_times, args.fig_path,
-        debug_path=args.debug_path, verbose=args.verbose,
+    fit_tac, hires_fit_tac = fit_vascular_mean_tac(
+        pvc_mean_tac, args.fig_path,
+        debug_path=args.debug_path, cache_path=args.cache_path, force=False,
+        verbose=args.verbose > 0
     )
 
     # Then apply vascular correction
     # vasc_corr_perc was hard-coded to 5 in the matlab wrapperStare.m
+    # TODO: If we don't have tacs, skip this? error?
     corrected_tacs = tac_vascular_correction(
         tacs, regions, args.vasc_corr_pct, fit_tac
     )
-    corrected_tacs.to_csv(args.debug_path / "corrected_tacs.tsv", index=None, sep='\t')
+    corrected_tacs.to_csv(
+        args.debug_path / "step_3_corrected_tacs.tsv", index=None, sep='\t'
+    )
     fig = plot_before_and_after_tacs(
         tacs, corrected_tacs, mid_times,
-        save_to=args.fig_path / "vascular_corrected_tacs.png"
     )
+    fig.savefig(args.fig_path / "step_3_vascular_corrected_tacs.png")
 
-    # Bootstrap signal in PVCed vasculature to generate input functions
-    # rslt2 = boot_anchor(rslt1)
+    # -------------------------------------------------------------------------
+    # Step 4. Bootstrap randomized samples
+    #
+    curves, k_constants, kis, kde_peaks, ki_peaks = boot_anchor(
+        pvc_mean_tac, corrected_tacs, args.vasc_corr_pct,
+        tracer=args.tracer,
+        bootstrap_iterations=1000,
+        cache_path=args.cache_path,
+        debug_path=args.debug_path,
+        force=False,
+        verbose=args.verbose > 0
+    )
+    # Write plots to visualize the bootstrapping
+    # Plot densities of each constant
+    for i, k_const in enumerate(["k1", "k2", "k3", "ki"]):
+        fig = plot_bootstrap_constant(
+            corrected_tacs.columns,
+            kis if k_const == "ki" else k_constants[:, :, i],
+            k_const,
+            subject=args.subject,
+            tracer=args.tracer,
+        )
+        fig.savefig(
+            args.fig_path / f"step_4_bootstrap_{k_const}_density_by_region.png"
+        )
+
+    # Plot all bootstrap curves
+    fig = plot_bootstrap_curves(
+        curves, hires_fit_tac, pvc_mean_tac, args.subject
+    )
+    fig.savefig(args.fig_path / f"step_4_bootstrap_curves.png")
 
     # Minimize the cost function
-    # rslt3 = minimize_cost_function(fit_tac)
+    final_results = minimize_cost_function(
+        k_constants=k_constants,  # [26 x 6 x 3] doubles
+        mid_times=mid_times,
+        corrected_tacs=corrected_tacs,
+        weights=pvc_mean_tac.weights(),
+        region_weights=None,
+        uniform_vasc_tac=hires_fit_tac,
+        bootstrap_ki_peaks=ki_peaks,
+        out_path=args.output_path,
+        debug_path=args.debug_path,
+        subject=args.subject,
+    )
+    fig = plot_all_stare_tac_fits(
+        corrected_tacs, mid_times, final_results
+    )
+    fig.savefig(args.fig_path / f"final_fits.png")
 
     # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
