@@ -1,13 +1,13 @@
 import numpy as np
 import logging
 import pickle
-from fitting_models import decay_model, find_curve_fits, func2tc_model
 from scipy.interpolate import pchip_interpolate
 from scipy.optimize import least_squares
 from scipy.stats import gaussian_kde
 
 from .timeactivitycurve import TimeActivityCurve
-from.util import get_kde_fwhm_points
+from .util import get_kde_fwhm_points
+from .fitting_models import decay_model, find_curve_fits, func2tc_model
 
 
 def gen_bootstrap_curves(
