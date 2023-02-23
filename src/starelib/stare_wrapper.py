@@ -5,7 +5,6 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import nibabel as nib
-import pandas as pd
 import pickle
 
 from .util import combine_volumes_into_4d, image_in_millicuries
@@ -191,7 +190,7 @@ def validate_arguments(args):
     if args.regions is None:
         # If not specified, use a default bucket of regions.
         setattr(args, "regions",
-                ['cerfullcs_c', 'cin', 'hip', 'par', 'pfc1_left', 'pip', ])
+                ['cerfullcs_c', 'cin', 'hip', 'par', 'pph', 'pip', ])
         # msg = f"No regions are specified; there's nothing to be done."
         # errors.append(msg)
     else:
@@ -238,6 +237,7 @@ def stare(args):
     # Validate out_path argument
     begin_timestamp = datetime.now()
     logger.info(f"Begin STARE at {begin_timestamp}.")
+    ok_to_run = True
 
     # Read PET data
     tacs = get_tacs(
@@ -246,6 +246,7 @@ def stare(args):
     if tacs is None:
         logger.error("Failed to load TACs")
         regions = None
+        ok_to_run = False
     else:
         if len(tacs.columns) < len(args.regions):
             dropped_regions = [r for r in args.regions if r not in tacs.columns]
@@ -260,26 +261,40 @@ def stare(args):
         args.input_path, args.subject
     )
     if plasma_tac is None:
-        logger.error("Failed to load plasma TAC")
-    pickle.dump(
-        plasma_tac,
-        open(args.output_path / "debug" / "tac_plasma.pkl", "wb")
-    )
+        logger.warning("Failed to load plasma TAC. "
+                       "STARE will run, but cannot compare to plasma.")
+    if args.verbose > 0:
+        pickle.dump(
+            plasma_tac,
+            open(args.debug_path / "tac_plasma.pkl", "wb")
+        )
 
     mid_times, ignored_mid_times = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
     )
     if mid_times is None:
         logger.error("Failed to load midtimes")
+        ok_to_run = False
 
     # I'd like to avoid this and just load one 4D image, but the PVC later
     # requires each image independently, so we persist with loading them all.
+    # TODO: Handle loading one 4D or multiple 3D, then do the right thing w/PVC
     orig_images = get_images(
         args.input_path, args.output_path, args.subject, args.ignore_frames
     )
     if orig_images is None:
         logger.error("Failed to load PET image data")
+        ok_to_run = False
 
+    # If we don't have what we need, don't even start.
+    if not ok_to_run:
+        logger.error("Unable to find sufficient data to run STARE.\n"
+                     "See previous errors above to determine what's missing.")
+        return 1
+
+    # Everything appears workable, start the modules.
+    # TODO: Every module gets passed 'args' and 'logger'.
+    #       We may need a layer between STARE code and library functions.
     # Step 0. Format PET data
 
     # Collect all the 3d image data into a single 4d structure.
@@ -400,7 +415,6 @@ def stare(args):
 
     # Then apply vascular correction
     # vasc_corr_perc was hard-coded to 5 in the matlab wrapperStare.m
-    # TODO: If we don't have tacs, skip this? error?
     corrected_tacs = tac_vascular_correction(
         tacs, regions, args.vasc_corr_pct, fit_tac
     )
@@ -444,7 +458,9 @@ def stare(args):
     )
     fig.savefig(args.fig_path / f"step_4_bootstrap_curves.png")
 
-    # Minimize the cost function
+    # -------------------------------------------------------------------------
+    # Step 5. Find best global parameters with simulated annealing
+
     final_results = minimize_cost_function(
         k_constants=k_constants,  # [26 x 6 x 3] doubles
         mid_times=mid_times,
@@ -460,11 +476,11 @@ def stare(args):
     fig = plot_all_stare_tac_fits(
         corrected_tacs, mid_times, final_results
     )
-    fig.savefig(args.fig_path / f"final_fits.png")
+    fig.savefig(args.fig_path / f"step_5_final_fits.png")
 
     # Output time and duration for those who care to benchmark
     finish_timestamp = datetime.now()
     logger.info(f"STARE is finished at {finish_timestamp}.")
     logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")
 
-    return 0 if isinstance(corrected_tacs, pd.DataFrame) else 1
+    return 0
