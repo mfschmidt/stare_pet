@@ -326,3 +326,43 @@ def source_to_target_tissue_model(
         )
 
     return impulse_response_func, target_tac_fits
+
+
+def solve_stttm(
+        x, i, source_tac, uniform_tac,
+        region_weights, tac_weights, target_tacs, ki_peaks
+):
+    """ Calculate s2ttm from (regions * 3)-length array of parameters
+    """
+
+    # Extract parameter estimates for the source region, these end up scalars
+    # x is a 1D [regions * ks] array, with 3 ks
+    num_regions = int(len(x) / 3)
+    k_1_s = x[i]
+    k_2_s = x[i + num_regions]
+    k_3_s = x[i + num_regions + num_regions]
+    k_i_s = k_1_s * (k_3_s / (k_2_s + k_3_s))
+    source_parameters = np.array([k_1_s, k_2_s, k_3_s, k_i_s])
+
+    # Target parameters, strip out the source region's ks, keep the rest
+    xt = np.delete(
+        x, (i, i + num_regions, i + num_regions + num_regions)
+    )
+    k_1_t = xt[0:num_regions - 1]
+    k_2_t = xt[num_regions - 1:(num_regions - 1) * 2]
+    k_3_t = xt[(num_regions - 1) * 2:]
+    k_i_t = k_1_t * (k_3_t / (k_2_t + k_3_t))
+    target_parameters = np.array([k_1_t, k_2_t, k_3_t, k_i_t])
+
+    k_i = np.insert(k_i_t, i, k_i_s)
+    k_i_penalty = np.sum(abs(k_i - ki_peaks))
+
+    impulse_response_func, target_tac_fits = source_to_target_tissue_model(
+        source_parameters, target_parameters, source_tac, uniform_tac
+    )
+    cost = np.sum(
+        region_weights *
+        np.sum(tac_weights[:, np.newaxis] * (target_tacs - target_tac_fits)**2)
+    ) + k_i_penalty
+
+    return impulse_response_func, target_tac_fits, k_i, k_i_penalty, cost

@@ -8,9 +8,10 @@ from nibabel.funcs import concat_images
 import nilearn.image
 from scipy.stats import gaussian_kde
 import warnings
+import pickle
 
 
-# Store lists of images as lists of namedtuples
+# Store each image as a namedtuple with more data
 Image = namedtuple('Image', 'path filename prefix frame nifti')
 
 
@@ -49,8 +50,8 @@ def unflatten_2d_to_4d(a2d, new_shape, zxy=True):
         :returns ndarray: The 4d image
     """
 
-    # This unflattening matches the flattening above so it
-    # can reverse what was done before. If one function is
+    # This un-flattening matches the flattening above to
+    # reverse what was done before. If one function is
     # changed, the other should be changed to match.
     if zxy:
         img4d = np.zeros(new_shape)
@@ -74,8 +75,8 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
         :returns ndarray: The 4d image
     """
 
-    # This unflattening matches the flattening above so it
-    # can reverse what was done before. If one function is
+    # This un-flattening matches the flattening above to
+    # reverse what was done before. If one function is
     # changed, the other should be changed to match.
     if zxy:
         img4d = np.zeros(new_shape)
@@ -93,7 +94,7 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
 def combine_volumes_into_4d(volumes, output_file, logger=None):
     """ From a list of 3D volumes, build a 4D image.
 
-    :param list volumes: A list of dicts describing volumes
+    :param list volumes: A list of Image tuples describing volumes
     :param output_file: The path to save the 4D file
     :param logging.Logger logger: A logger for output
 
@@ -114,6 +115,31 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
                  f"to {str(output_file.parent)}")
 
     return combined_image
+
+
+def explode_4d_into_volumes(image, out_path, name_template):
+    """ Save individual 3d volumes from 4d image.
+
+    :param image: 4d nifti image
+    :param out_path: path to save separate volumes
+    :param name_template: format string for naming volume files
+    :return: list of individual volumes
+    """
+
+    volumes = []
+    nifti_vols = [image.slicer[:, :, :, t] for t in range(image.shape[3])]
+    for i, nifti_vol in enumerate(nifti_vols):
+        image = Image(
+            path=out_path,
+            filename=name_template.format(i + 1),
+            prefix="orig",
+            frame=i + 1,
+            nifti=nifti_vol,
+        )
+        nib.save(nifti_vol, image.path / image.filename)
+        volumes.append(image)
+
+    return volumes
 
 
 def characterize_mid_times(mid_times, missing_mid_times=None, beginning=0.0):
@@ -215,3 +241,22 @@ def get_kde_fwhm_points(values, stat='count', num_bootstraps=1000):
     ])
 
     return xy_trio, kde_x, kde_y
+
+
+def from_cache(cache_path, filename, force=False):
+    """ Look for cached data, return it if available.
+    """
+
+    thing, cache_file = None, None
+
+    if cache_path is not None and cache_path.exists():
+        cache_file = cache_path / filename
+    if cache_file is not None and cache_file.exists() and not force:
+        thing = pickle.load(cache_file.open("rb"))
+
+    return thing
+
+
+def to_cache(thing, cache_path, filename):
+    cache_file = cache_path / filename
+    pickle.dump(thing, cache_file.open("wb"))

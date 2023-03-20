@@ -1,11 +1,11 @@
 import numpy as np
 import pickle
-import logging
 from scipy.interpolate import interp1d, PchipInterpolator
 
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_detailed_tacs
 from .fitting_models import decay_model, find_curve_fits
+from .util import from_cache, to_cache
 
 
 def select_best_fit(fits, weighted=True):
@@ -100,20 +100,10 @@ def interpolate_full_tac(actual_tac, best_fit, model,
     return orig_res_tac, high_res_tac
 
 
-def fit_vascular_mean_tac(
-        pvc_tac, figure_path,
-        debug_path=None, cache_path=None, force=False,
-        verbose=1
-):
+def fit_vascular_mean_tac(results):
     """ Fit vascular mean TAC
 
-        :param TimeActivityCurve pvc_tac: The best TAC thus far (from PVC)
-        :param Path figure_path: The path for saving out figures
-        :param Path debug_path: The path for saving out debug information
-        :param Path cache_path: The path for saving out cached data
-        :param bool force: Set to true to override caches and recalculate
-        :param int verbose: Set to non-zero to trigger logging, higher is more
-
+        :param StareResults results: An object containing pipeline data
         :returns: TAC from weighted model fit
     """
 
@@ -188,53 +178,60 @@ def fit_vascular_mean_tac(
         pass
     """
 
-    logger = logging.getLogger("STARE")
+    logger = results.logger
+    rpt_sect = results.report.begin_section("Fit exponential decay model")
 
-    if cache_path is not None and cache_path.exists():
-        cache_file = cache_path / "step_3_decay_model_fits.pkl"
-    else:
-        cache_file = None
-    if cache_file is not None and cache_file.exists() and not force:
-        logger.info("  loading cached step 3 decay model fits to save time")
-        successes = pickle.load(cache_file.open("rb"))
-    else:
+    # -------------------------------------------------------------------------
+    # Step 3. Correct TACs by extracting the mean signal from each cluster.
+    # Needs to know about ignored mid-times to weight durations appropriately
+
+    cache_file = "step_3_decay_model_fits.pkl"
+    successes = from_cache(
+        results.args.cache_path, cache_file, results.args.force
+    )
+    if successes is None:
         # Fit repeatedly until we have ten successes or complete failure.
         # Only fitting decay of activity past the peak - not pre-peak rise
         successes = find_curve_fits(
             decay_model,
-            pvc_tac.post_peak_timepoints(),
-            pvc_tac.post_peak_activity(),
-            sigmas=pvc_tac.post_peak_sigmas(method='sqrt'),
+            results.pvc_mean_vascular_tac.post_peak_timepoints(),
+            results.pvc_mean_vascular_tac.post_peak_activity(),
+            sigmas=results.pvc_mean_vascular_tac.post_peak_sigmas(method='sqrt'),
             success_limit=10, failure_limit=8192
         )
-        if cache_file is not None:
-            pickle.dump(successes, cache_file.open("wb"))
-            logger.debug(f"WROTE {cache_file.name} (pickled rate_constants) "
-                         f"to {str(cache_path)}")
-    if debug_path is not None:
+        to_cache(successes, results.args.cache_path, cache_file)
+    else:
+        logger.info("  loaded cached step 3 decay model fits to save time")
+
+    if results.args.debug_path is not None:
         pickle.dump(
             successes,
-            open(debug_path / f"fits.pkl", "wb")
+            open(results.args.debug_path / f"fits.pkl", "wb")
         )
     best_fit = select_best_fit(successes)
     lores_tac, hires_tac = interpolate_full_tac(
-        pvc_tac, best_fit, decay_model
+        results.pvc_mean_vascular_tac, best_fit, decay_model
     )
     lores_tac.name = "decay model fit"
-    lores_tac.sd = pvc_tac.sd
+    lores_tac.sd = results.pvc_mean_vascular_tac.sd
 
     fig = plot_detailed_tacs([lores_tac, hires_tac])
-    fig.savefig(figure_path / "fits_hi_vs_lo_res.png")
-    if verbose > 0 and debug_path is not None:
+    fig.savefig(results.args.fig_path / "fits_hi_vs_lo_res.png")
+    if results.args.verbose > 0 and results.args.debug_path is not None:
         pickle.dump(
             lores_tac,
-            open(debug_path / f"tac_from_fitting.pkl", "wb")
+            open(results.args.debug_path / f"tac_from_fitting.pkl", "wb")
         )
         pickle.dump(
             hires_tac,
-            open(debug_path / f"hires_tac_from_fitting.pkl", "wb")
+            open(results.args.debug_path / f"hires_tac_from_fitting.pkl", "wb")
         )
 
     # Return the one best, properly weighted, interpolated TAC in original res.
     # This can be used to reduce the vascular influence on measured TACs later.
-    return lores_tac, hires_tac
+    results.fitting_successes = successes
+    results.fitted_tac = lores_tac
+    results.fitted_hires_tac = hires_tac
+
+    rpt_sect.end()
+    return results

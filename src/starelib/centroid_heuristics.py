@@ -1,8 +1,9 @@
 import numpy as np
 import logging
+from datetime import datetime
+from sklearn.cluster import KMeans
 
 from .centroid import Centroid
-from .clustering import find_centroids
 
 
 def likely_irreversible(c):
@@ -55,6 +56,82 @@ def likely_peripheral(c):
     # NOTE: Use functions above as examples.
     # NOTE: This should always return True; return something more useful.
     return len(c.activity) > 0
+
+
+def find_centroids(data, ks, features, mid_times=None, verbose=0):
+    """ Step 1. From all PET data, find a vascular cluster.
+
+        Loop over all values for k in ks, looking for clusters that
+        exhibit vascular-like properties. Return the best possible
+        cluster.
+
+        :param ndarray data: Array of timeseries
+        :param iterable ks: Iterable of integers, each used as a k in k-means
+        :param features: A dict of functions to assign features to centroids
+        :param iterable mid_times: will be stored alongside activity in TACs
+        :param int verbose: Set non-zero to increase logging, higher is more
+
+        :returns tuple: The best TAC, and all the TACs
+    """
+
+    logger = logging.getLogger("STARE")
+
+    # Do k-means clustering of timeseries for many values of k
+    # from Matlab vascClust.m:112:158
+    pre_k_timestamp = datetime.now()
+    k_means_fits = {}
+    all_centroids = []
+    for k in ks:
+        logger.info(f"K-means (k={k})")
+        pre_1k_timestamp = datetime.now()
+        k_means = KMeans(init="k-means++", n_clusters=k,
+                         n_init=3, max_iter=1024**2, random_state=42,
+                         verbose=verbose, )
+        k_means.fit(data)
+        k_means_fits[k] = k_means
+        post_1k_timestamp = datetime.now()
+        logger.info(f"  lowest inertia == {k_means.inertia_:0.0f}"
+                    f" after {k_means.n_iter_} iterations"
+                    f" in {post_1k_timestamp - pre_1k_timestamp}.")
+
+        # Count features for reporting, not necessary for execution
+        feature_counts = {"total": 0}
+        for feature_label in features.keys():
+            feature_counts[feature_label] = 0
+
+        # Find reasonable timeseries in the cluster means.
+        # count_irreversible, count_noise = 0, 0
+        for i in range(k_means.n_clusters):
+            cc = k_means.cluster_centers_[i]
+            this_centroid = Centroid(
+                activity=cc,
+                timepoints=mid_times,
+                label=i + 1,  # should be non-zero as zero indicates background
+                k=k,
+                labels=k_means.labels_ + 1,
+                name=f"centroid {i + 1}/{k}"
+            )
+            # Save features of this centroid, like whether it is
+            # noise, vascular, peripheral, etc. using functions provided.
+            for feature_label, fxn in features.items():
+                this_centroid.features[feature_label] = fxn(this_centroid)
+                if this_centroid.features[feature_label]:
+                    feature_counts[feature_label] += 1
+            feature_counts["total"] += 1
+
+            all_centroids.append(this_centroid)
+
+        for label, count in feature_counts.items():
+            if label != "total":
+                logger.debug(
+                    f"  {count:03d} / {feature_counts['total']:03d} are {label}"
+                )
+
+    post_k_timestamp = datetime.now()
+    logger.info(f"All {len(ks)} k-means finished in "
+                f"{post_k_timestamp - pre_k_timestamp}")
+
+    return all_centroids, k_means_fits
 
 
 def find_vascular_centroids(data, ks, mid_times=None, verbose=0):

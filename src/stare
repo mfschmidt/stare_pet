@@ -8,10 +8,18 @@
     from the command line.
 """
 
-from starelib.stare_wrapper import get_argument_parser, validate_arguments, stare
+from starelib.stare_wrapper import get_argument_parser, validate_arguments
+from starelib.stare_results import StareResults
+from starelib.loader import gather_data
+from starelib.clustering import two_step_cluster
+from starelib.partial_volume import correct_partial_volumes
+from starelib.fit_mean_tac import fit_vascular_mean_tac
+from starelib.vascular_correction import tac_vascular_correction
+from starelib.boot_anchor import boot_anchor
+from starelib.minimize_cost import minimize_cost_function
 
 
-def main(args):
+def main(parsed_args):
     """ Entry point """
 
     # Asking wrapper.arguments_valid to handle arguments allows it to
@@ -19,8 +27,22 @@ def main(args):
     # notify the caller of any problems. If anything does not look
     # right, it will return False, and we will quit rather than
     # attempting to run with bad input.
-    if validate_arguments(args):
-        return stare(args)
+    if validate_arguments(parsed_args):
+        # The results object is a big container for all intermediate data
+        # structures we want to keep around.
+        # We can read to it and write from it, and it keeps a log of
+        # everything, so building a report at the end is easier.
+        results = StareResults("STARE", parsed_args)
+        results = gather_data(results)
+        results = two_step_cluster(results)
+        results = correct_partial_volumes(results)
+        results = fit_vascular_mean_tac(results)
+        results = tac_vascular_correction(results)
+        results = boot_anchor(results)
+        results = minimize_cost_function(results)
+        results.end()
+        results.write_report()
+        return 0
     else:
         return 1
 

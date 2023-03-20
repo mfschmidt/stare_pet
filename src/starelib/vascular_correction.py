@@ -1,25 +1,40 @@
 import numpy as np
 import pandas as pd
 
+from .plotting import plot_before_and_after_tacs
 
-def tac_vascular_correction(tacs, regions, vasc_corr_perc, pvc_vasc_tac_fit):
+
+def tac_vascular_correction(results):
     """ Find several options for fitting data to our model.
 
-        :param DataFrame tacs: a timepoints x regions dataframe of TACs
-        :param list regions: column labels indicating tacs regions
-        :param int vasc_corr_perc: The percentage of TAC due to vascular effect
-                                   between 0 and 100
-        :param pvc_vasc_tac_fit: Modeled vascular TAC
+        :param StareResults results: An object storing pipeline data
         :return DataFrame: corrected tacs, same shape as input tacs
     """
 
-    pct = vasc_corr_perc / 100.0
-    vtac = pvc_vasc_tac_fit.activity
+    rpt_sect = results.report.begin_section("Regional TAC vascular correction")
+
+    pct = results.args.vasc_corr_pct / 100.0
+    fit_tac = results.fitted_tac.activity
     corrected_tacs = pd.DataFrame(
-        data=np.zeros(tacs.shape), columns=regions,
+        data=np.zeros(results.tacs.shape),
+        columns=results.regions,
     )
-    for r in regions:
+    for r in results.regions:
         corrected_tacs.loc[:, r] = (
-                (1 / (1 - pct)) * (tacs.loc[:, r].values - pct * vtac)
+            (1 / (1 - pct)) * (results.tacs.loc[:, r].values - pct * fit_tac)
         )
-    return corrected_tacs
+
+    # Write out the corrected tacs as a csv file
+    corrected_tacs.to_csv(
+        results.args.debug_path / "step_3_corrected_tacs.tsv",
+        index=None, sep='\t'
+    )
+    fig = plot_before_and_after_tacs(
+        results.tacs, corrected_tacs, results.mid_times,
+    )
+    fig.savefig(results.args.fig_path / "step_3_vascular_corrected_tacs.png")
+
+    results.corrected_tacs = corrected_tacs
+
+    rpt_sect.end()
+    return results

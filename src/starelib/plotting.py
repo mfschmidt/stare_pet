@@ -19,7 +19,7 @@ betsy_palette = {
     "cin": 'red', "fit_cin": 'red',
     "hip": 'orange', "fit_hip": 'orange',
     "par": 'purple', "fit_par": 'purple',
-    "pfc1_left": 'green', "fit_pfc1_left": 'green',
+    "pph": 'green', "fit_pph": 'green',
     "pip": 'cyan', "fit_pip": 'cyan',
 }
 
@@ -787,7 +787,7 @@ def plot_all_stare_tac_fits(
         source_data = plottable_data[plottable_data["region"] == source_region]
         target_data = plottable_data[plottable_data["region"] != source_region]
         plottable_fits = melt_tac_dataframe(pd.DataFrame(
-            data=optimizations[i]["tgt_fits"],
+            data=optimizations[i]["tgt_tac_fits"],
             columns=[f"fit_{col}" for col in tac_data.columns
                      if col not in [source_region, 't', ]],
         ), mid_times)
@@ -819,7 +819,7 @@ def plot_all_stare_tac_fits(
         # Optionally, also plot matlab results for comparison
         if comparisons is not None and i in comparisons:
             plottable_comp = melt_tac_dataframe(pd.DataFrame(
-                data=comparisons[i]["tgt_fits"],
+                data=comparisons[i]["tgt_tac_fits"],
                 columns=[f"fit_{col}"
                          for col in tac_data.columns
                          if col not in [source_region, 't', ]],

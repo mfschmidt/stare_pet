@@ -2,12 +2,14 @@ from pathlib import Path
 import numpy as np
 import logging
 import nibabel as nib
-from sklearn.cluster import KMeans
 from datetime import datetime
 import pickle
 
 from .util import flatten_4d_to_2d, reshape_labels_to_3d
+from .util import from_cache, to_cache
 from .centroid import Centroid
+from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
+from .centroid_heuristics import find_vascular_centroids
 
 
 def make_atlas_and_mask(centroid, template_img, pad_inferior=0, out_path=None):
@@ -98,7 +100,7 @@ def save_centroid_masks(centroids, mask_output_path,
 
         :param list centroids: list of Centroid objects to write to disk
         :param Path mask_output_path: The path for writing out masks
-        :param Nifti1Image current_template: An image in cropped clustering space
+        :param Nifti1Image current_template: An image in cropped cluster space
         :param Nifti1Image original_template: An image in original space
         :param int axial_slices_to_clip: how many axial slices to remove
         :param int verbose: higher numbers indicate more verbosity
@@ -106,17 +108,17 @@ def save_centroid_masks(centroids, mask_output_path,
         :return nibabel.Nifti1Image: the best atlas image, in original space
     """
 
-    best_atlas = None
+    best_mask_path = None
     for centroid in centroids:
         if centroid.best_overall:
             # Write the best atlas and mask to disk regardless of verbosity.
             # Specifying out_path causes masks to be written to disk.
-            make_atlas_and_mask(
+            best_mask_path = make_atlas_and_mask(
                 centroid, current_template, out_path=mask_output_path
             )
             # Add back the cropped axial slices and save image in original space
             if axial_slices_to_clip > 0:
-                best_atlas = make_atlas_and_mask(
+                best_mask_path = make_atlas_and_mask(
                     centroid, original_template,
                     pad_inferior=axial_slices_to_clip, out_path=mask_output_path
                 )
@@ -129,90 +131,41 @@ def save_centroid_masks(centroids, mask_output_path,
                     out_path=mask_output_path.parent / "debug"
                 )
 
-    return best_atlas
+    # This should be in original space, cropped sliced padded back
+    return best_mask_path
 
 
-def find_centroids(data, ks, features, mid_times=None, verbose=0):
-    """ Step 1. From all PET data, find a vascular cluster.
+def cluster(results, cluster_function, data, ks, step):
+    # If prior models were saved to disk, load them rather than running.
+    cache_file = f"step_{step}_centroids_and_fits.pkl"
+    cached_data = from_cache(
+        results.args.cache_path, cache_file, results.args.force
+    )
+    if cached_data is None:
+        centroids, model_fits = cluster_function(
+            data, ks, mid_times=results.mid_times,
+            verbose=results.args.verbose
+        )
+        to_cache(
+            (centroids, model_fits), results.args.cache_path, cache_file
+        )
+    else:
+        (centroids, model_fits) = cached_data
+        results.logger.info(f"  loaded cached step {step} k-means to save time")
 
-        Loop over all values for k in ks, looking for clusters that
-        exhibit vascular-like properties. Return the best possible
-        cluster.
+    # Label the best centroid for proper figure legend
+    for c in centroids:
+        if c.best_in_k:
+            c.name = f"Best step {step}. {c.name}"
 
-        :param ndarray data: Array of timeseries
-        :param iterable ks: Iterable of integers, each used as a k in k-means
-        :param features: A dict of functions to assign features to centroids
-        :param iterable mid_times: will be stored alongside activity in TACs
-        :param int verbose: Set non-zero to increase logging, higher is more
+    results.cluster_centroids[step] = centroids
+    results.cluster_model_fits[step] = model_fits
 
-        :returns tuple: The best TAC, and all the TACs
-    """
-
-    logger = logging.getLogger("STARE")
-
-    # Do k-means clustering of timeseries for many values of k
-    # from Matlab vascClust.m:112:158
-    pre_k_timestamp = datetime.now()
-    k_means_fits = {}
-    all_centroids = []
-    for k in ks:
-        # vascular_centroids = []
-        # other_centroids = []
-        logger.info(f"K-means (k={k})")
-        pre_1k_timestamp = datetime.now()
-        k_means = KMeans(init="k-means++", n_clusters=k,
-                         n_init=3, max_iter=1024**2, random_state=42,
-                         verbose=verbose, )
-        k_means.fit(data)
-        k_means_fits[k] = k_means
-        post_1k_timestamp = datetime.now()
-        logger.info(f"  lowest inertia == {k_means.inertia_:0.0f}"
-                    f" after {k_means.n_iter_} iterations"
-                    f" in {post_1k_timestamp - pre_1k_timestamp}.")
-
-        # Count features for reporting, not necessary for execution
-        feature_counts = {"total": 0}
-        for feature_label in features.keys():
-            feature_counts[feature_label] = 0
-
-        # Find reasonable timeseries in the cluster means.
-        # count_irreversible, count_noise = 0, 0
-        for i in range(k_means.n_clusters):
-            cc = k_means.cluster_centers_[i]
-            this_centroid = Centroid(
-                activity=cc,
-                timepoints=mid_times,
-                label=i + 1,  # should be non-zero as zero indicates background
-                k=k,
-                labels=k_means.labels_ + 1,
-                name=f"centroid {i + 1}/{k}"
-            )
-            # Save features of this centroid, like whether it is
-            # noise, vascular, peripheral, etc. using functions provided.
-            for feature_label, fxn in features.items():
-                this_centroid.features[feature_label] = fxn(this_centroid)
-                if this_centroid.features[feature_label]:
-                    feature_counts[feature_label] += 1
-            feature_counts["total"] += 1
-
-            all_centroids.append(this_centroid)
-
-        for label, count in feature_counts.items():
-            if label != "total":
-                logger.debug(f"  {count:03d} /{feature_counts['total']:03d} are {label}")
-
-    post_k_timestamp = datetime.now()
-    logger.info(f"All {len(ks)} k-means finished in "
-                f"{post_k_timestamp - pre_k_timestamp}")
-
-    return all_centroids, k_means_fits
+    return centroids, model_fits
 
 
-def two_step_clustering(
-        image, step_one_ks, step_two_ks, cluster_function, mid_times,
-        cache_path=None, force=False, verbose=0
-):
-    """ Perform two step clustering of PET data
+def two_step_cluster(results):
+    """ Perform two-step clustering of PET data
 
         This step is the first of six in the STARE process.
         It flattens the four dimensions of a series of volumes
@@ -222,19 +175,17 @@ def two_step_clustering(
         Centroids from each cluster are then plotted
         before and after "best" centroids are recognized.
 
-        :param Nifti1Image image: A 4d image, containing a sequence of volumes
-        :param list step_one_ks: A list of ints to serve as cluster quantities
-        :param list step_two_ks: A list of ints to serve as cluster quantities
-        :param function cluster_function: A centroid selection function
-        :param Path cache_path: the path for reading and writing cached data
-        :param list mid_times: A list of images
-        :param int force: If true, run everything regardless of cache
-        :param int verbose: Set to non-zero to trigger logging, higher is more
-
+        :param Results results: An object containing pipeline data
         :return: None
     """
 
-    logger = logging.getLogger("STARE")
+    logger = results.logger
+    rpt_sect = results.report.begin_section("Two-level k-means clustering")
+
+    # Predetermined configuration, hardcoded here
+    step_one_ks = list(range(6, 40, 4))
+    step_two_ks = [4, ]
+    cluster_function = find_vascular_centroids
 
     pre_kmc_timestamp = datetime.now()
     logger.info(f"Started two-level k-means clustering at {pre_kmc_timestamp}")
@@ -245,7 +196,7 @@ def two_step_clustering(
     # -------------------------------------------------------------------------
 
     # We need a timeseries vector at each voxel.
-    to_cluster = flatten_4d_to_2d(image.get_fdata(), zxy=True)
+    to_cluster = flatten_4d_to_2d(results.cropped_4D.get_fdata(), zxy=True)
 
     # -------------------------------------------------------------------------
     # Step 1. Find the best candidate for a vascular cluster of voxels.
@@ -253,27 +204,7 @@ def two_step_clustering(
     #         and selects the best cluster
     # -------------------------------------------------------------------------
 
-    # If prior models were saved to disk, load them rather than running.
-    if cache_path is not None and cache_path.exists():
-        cache_file_1 = cache_path / "step_1_centroids_and_fits.pkl"
-    else:
-        cache_file_1 = None
-    if cache_file_1 is not None and cache_file_1.exists() and not force:
-        logger.info("  loading cached step 1 k-means to save time")
-        centroids_step_1, model_fits = pickle.load(cache_file_1.open("rb"))
-    else:
-        centroids_step_1, model_fits = cluster_function(
-            to_cluster, step_one_ks, mid_times=mid_times, verbose=verbose
-        )
-        if cache_file_1 is not None:
-            pickle.dump((centroids_step_1, model_fits), cache_file_1.open("wb"))
-            logger.debug(f"WROTE {cache_file_1.name} (pickled all_centroids "
-                         f"and model_fits tuple) to {str(cache_path)}")
-
-    # Label the best centroid for proper figure legend
-    for c in centroids_step_1:
-        if c.best_in_k:
-            c.name = f"Best step 1. {c.name}"
+    cluster(results, cluster_function, to_cluster, step_one_ks, 1)
 
     # -------------------------------------------------------------------------
     # Step 2. Find the best candidate from step 1 for a vascular cluster of
@@ -281,42 +212,53 @@ def two_step_clustering(
     #         within only the voxels discovered in step 1.
     # -------------------------------------------------------------------------
 
-    # All of the following atlases and masks from make_atlas_and_mask are Nifti1
+    # All the following atlases and masks from make_atlas_and_mask are Nifti1
     # images, which are translated from Analyze images in fsleyes or freeview.
     # The affine matrices are identical, so it will take some digging to find
     # the source of the problem or to determine if it is actually a problem.
     # Overlaying HarvardOxford atlas regions in fsleyes lays them atop the
     # NEW Nifti1 space, not the original SpmAnalyze space.
 
-    # Mask out only the voxels belonging to the best cluster from step 1.
-    top_centroid_step_1 = best_of(centroids_step_1)
-
-    # Generate the masked data, with only the best centroid's data
+    # Generate the masked data, with only the best centroid's data from step 1.
     top_centroid_masked_data = np.zeros(to_cluster.shape, )
-    top_cluster_mask = top_centroid_step_1.labels == top_centroid_step_1.label
+    best_centroid_step_1 = best_of(results.cluster_centroids[1])
+    top_cluster_mask = best_centroid_step_1.labels == best_centroid_step_1.label
     top_centroid_masked_data[top_cluster_mask] = to_cluster[top_cluster_mask, :]
 
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
-    if cache_path is not None and cache_path.exists():
-        cache_file_2 = cache_path / "step_2_centroids_and_fits.pkl"
-    else:
-        cache_file_2 = None
-    if cache_file_2 is not None and cache_file_2.exists() and not force:
-        logger.info("  loading cached step 2 k-means to save time")
-        centroids_step_2, model_fits_2 = pickle.load(cache_file_2.open("rb"))
-    else:
-        centroids_step_2, model_fits_2 = cluster_function(
-            top_centroid_masked_data, step_two_ks, mid_times=mid_times, verbose=verbose
+    cluster(results, cluster_function, top_centroid_masked_data, step_two_ks, 2)
+
+    # Plot the TACs from the first k-means step
+    for step in [1, 2, ]:
+        # Plot the TACs from vascular cluster centroids.
+        fig = plot_vascular_tacs(results.cluster_centroids[step])
+        filename = f"step_1_{step}_vascular_tacs.png"
+        fig.savefig(results.args.fig_path / filename)
+        logger.info(f"WROTE {filename} to {str(results.args.fig_path)}")
+
+        # These data can be used to build custom plots or otherwise explore.
+        filename = f"step_1_{step}_kmeans_tac.csv"
+        tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
+            results.args.output_path / filename
         )
-        if cache_file_2 is not None:
-            pickle.dump((centroids_step_2, model_fits_2), cache_file_2.open("wb"))
-            logger.debug(f"WROTE {cache_file_2.name} (pickled all_centroids "
-                         f"and model_fits tuple) to {str(cache_path)}")
+        logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
-    # Label the best centroid for proper figure legend
-    for c in centroids_step_2:
-        if c.best_in_k:
-            c.name = f"Best step 2. {c.name}"
+        filename = f"step_1_{step}_kmeans_centroid.pkl"
+        pickle.dump(
+            best_of(results.cluster_centroids[step]),
+            open(results.args.output_path / "debug" / filename, "wb")
+        )
 
-    return centroids_step_1, centroids_step_2
+        best_vascular_mask_path = save_centroid_masks(
+            results.cluster_centroids[step],
+            results.args.output_path / "masks",
+            results.cropped_4D.slicer[:, :, :, 0],
+            results.input_4D.slicer[:, :, :, 0],
+            axial_slices_to_clip=results.args.axial_slices_to_clip,
+            verbose=results.args.verbose
+        )
+        results.best_vascular_mask_path = best_vascular_mask_path
+
+    rpt_sect.end()
+    return results

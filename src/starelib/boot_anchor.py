@@ -1,5 +1,4 @@
 import numpy as np
-import logging
 import pickle
 from scipy.interpolate import pchip_interpolate
 from scipy.optimize import least_squares
@@ -7,7 +6,9 @@ from scipy.stats import gaussian_kde
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
+from .util import from_cache, to_cache
 from .fitting_models import decay_model, find_curve_fits, func2tc_model
+from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
 
 
 def gen_bootstrap_curves(
@@ -291,89 +292,83 @@ def find_2tc_bounds(rate_constants):
     return bounds, peaks, fwhm
 
 
-def boot_anchor(
+def boot_anchor(results):
+    """
         pvc_mean_tac,  # contains activity, sd, times, index
         corrected_regional_tacs,
         vasc_corr_pct,
-        tracer='FDG',
-        bootstrap_iterations=1000,
-        cache_path=None,
-        debug_path=None,
         force=False,
         verbose=False,
-):
-    """
 
     :return:
     """
 
-    logger = logging.getLogger("STARE")
+    logger = results.logger
+    rpt_sect = results.report.begin_section("Bootstrap anchoring")
+
+    # Manual configuration
+    bootstrap_iterations = 1000
 
     # Currently, only FDG is supported. Other tracers would require
     # changes to this 2TCirr. We would then have to check the tracer.
     num_2tc_params = 3
-    if tracer != 'FDG':
+    if results.args.tracer != 'FDG':
         # Perhaps, in the future, reversible tracers can have 4 parameters.
         raise ValueError("Tracer must be FDG. No others are yet supported.")
 
     # Generate a thousand curves, based on actual TAC plus random noise
     bootstrap_curves = gen_bootstrap_curves(
-        pvc_mean_tac.post_peak_activity(), pvc_mean_tac.post_peak_sd(),
+        results.pvc_mean_vascular_tac.post_peak_activity(),
+        results.pvc_mean_vascular_tac.post_peak_sd(),
         n=bootstrap_iterations, distribution='uniform', seed=999
     )
-    if debug_path is not None and debug_path.exists():
+    if results.args.debug_path is not None and results.args.debug_path.exists():
         pickle.dump(
             bootstrap_curves,
-            open(debug_path / "boot_curve_permutations.pkl", "wb")
+            open(results.args.debug_path / "boot_curve_permutations.pkl", "wb")
         )
 
     # Stretch fit_tac's timepoints out to be evenly spaced at 0.10 seconds.
     uniform_tac = make_uniform_time_curve(
-        pvc_mean_tac, spacing=0.10
+        results.pvc_mean_vascular_tac, spacing=0.10
     )
 
     # Attempt to fit each bootstrap curve to the stacked exponential decay model
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
-    if cache_path is not None and cache_path.exists():
-        cache_file_1 = cache_path / "step_4_good_curves.pkl"
-    else:
-        cache_file_1 = None
-    if cache_file_1 is not None and cache_file_1.exists() and not force:
-        logger.info("  loading cached step 4a curve fits to save time")
-        good_curves = pickle.load(cache_file_1.open("rb"))
-    else:
+    cache_file = "step_4_good_curves.pkl"
+    good_curves = from_cache(
+        results.args.cache_path, cache_file, results.args.force
+    )
+    if good_curves is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
         good_curves = fit_curves(
-            bootstrap_curves, pvc_mean_tac, uniform_tac, verbose=verbose
+            bootstrap_curves, results.pvc_mean_vascular_tac, uniform_tac,
+            verbose=results.args.verbose
         )
-        if cache_file_1 is not None:
-            pickle.dump(good_curves, cache_file_1.open("wb"))
-            logger.debug(f"WROTE {cache_file_1.name} (pickled good_curves) "
-                         f"to {str(cache_path)}")
+        to_cache(good_curves, results.args.cache_path, cache_file)
+    else:
+        logger.info("  loaded cached step 4a curve fits to save time")
 
     # Attempt to extract reasonable rate constants from each good curve
     # If prior rate constants were cached to disk, load them rather than running
-    if cache_path is not None and cache_path.exists():
-        cache_file_2 = cache_path / "step_4_rate_constants.pkl"
-    else:
-        cache_file_2 = None
-    if cache_file_2 is not None and cache_file_2.exists() and not force:
-        logger.info("  loading cached step 4b rate constants to save time")
-        good_rate_constants = pickle.load(cache_file_2.open("rb"))
-    else:
+    cache_file = "step_4_rate_constants.pkl"
+    good_rate_constants = from_cache(
+        results.args.cache_path, cache_file, results.args.force
+    )
+    if good_rate_constants is None:
         rate_constants = fit_curves_to_regional_tacs(
-            good_curves, pvc_mean_tac, uniform_tac, corrected_regional_tacs,
-            num_2tc_params, vasc_corr_pct, verbose=verbose
+            good_curves, results.pvc_mean_vascular_tac, uniform_tac,
+            results.corrected_tacs, num_2tc_params, results.args.vasc_corr_pct,
+            verbose=results.args.verbose
         )
         good_rate_constants = rate_constants[[
             ~np.any(np.isnan(rate_constants[_].ravel()))
             for _ in range(rate_constants.shape[0])
         ]]
-        if cache_file_2 is not None:
-            pickle.dump(good_rate_constants, cache_file_2.open("wb"))
-            logger.debug(f"WROTE {cache_file_2.name} (pickled rate_constants) "
-                         f"to {str(cache_path)}")
+        to_cache(good_rate_constants, results.args.cache_path, cache_file)
+    else:
+        logger.info("  loading cached step 4b rate constants to save time")
 
     # Get upper and lower bounds for 2TCM parameters
     kde_bounds, kde_peaks, kde_fwhm = find_2tc_bounds(
@@ -390,14 +385,14 @@ def boot_anchor(
     # solve all good rate constants, element-wise
     kis = np.multiply(k1, np.divide(k3, (k2 + k3)))
 
-    ki_fwhm = np.zeros((len(corrected_regional_tacs.columns), 3, 2))
-    for i in range(len(corrected_regional_tacs.columns)):
+    ki_fwhm = np.zeros((len(results.corrected_tacs.columns), 3, 2))
+    for i in range(len(results.corrected_tacs.columns)):
         ki_fwhm[i], _x, _y = get_kde_fwhm_points(kis[:, i])
 
     # For recursive plotting fixes:
     pickle.dump(
         {
-            "regional_tacs": corrected_regional_tacs,
+            "regional_tacs": results.corrected_tacs,
             "good_rate_constants": good_rate_constants,
             "kis": kis,
             "bounds": flattened_bounds,
@@ -408,7 +403,34 @@ def boot_anchor(
             "uniform_tac": uniform_tac,
             "uniform_curves": good_curves,
         },
-        open(debug_path / "boot_anchor_data.pkl", "wb")
+        open(results.args.debug_path / "boot_anchor_data.pkl", "wb")
     )
 
-    return good_curves, good_rate_constants, kis, kde_peaks, ki_fwhm
+    results.bootstrap_curves = good_curves
+    results.bootstrap_rate_constants = good_rate_constants
+    results.bootstrap_ki_fwhm = ki_fwhm
+
+    # Write plots to visualize the bootstrapping
+    # Plot densities of each constant
+    for i, k_const in enumerate(["k1", "k2", "k3", "ki"]):
+        fig = plot_bootstrap_constant(
+            results.corrected_tacs.columns,
+            kis if k_const == "ki" else results.bootstrap_rate_constants[:,:,i],
+            k_const,
+            subject=results.args.subject,
+            tracer=results.args.tracer,
+        )
+        fig.savefig(
+            results.args.fig_path /
+            f"step_4_bootstrap_{k_const}_density_by_region.png"
+        )
+
+    # Plot all bootstrap curves
+    fig = plot_bootstrap_curves(
+        results.bootstrap_curves, results.fitted_hires_tac,
+        results.pvc_mean_vascular_tac, results.args.subject
+    )
+    fig.savefig(results.args.fig_path / f"step_4_bootstrap_curves.png")
+
+    rpt_sect.end()
+    return results

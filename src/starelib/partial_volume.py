@@ -1,57 +1,51 @@
-import logging
 import subprocess
 from datetime import datetime
-from pathlib import Path
 import nibabel as nib
 import numpy as np
+import pickle
 
 from .util import Image, combine_volumes_into_4d, flatten_4d_to_2d
 from .timeactivitycurve import TimeActivityCurve
+from .plotting import tacs_to_plottable_dataframe, plot_detailed_tacs
 
 
-def correct_partial_volumes(
-        images, fwhm, output_path, vasc_mask, mid_times=None, pet_units='kBq',
-        force=False, verbose=0
-):
+def correct_partial_volumes(results):
     """ Correct partial volumes
 
-        :param list images: a list of paths to original 3D PET images
-        :param float fwhm: The full-width-half-maximum value for PVC correction
-        :param Path output_path: the main output path for one subject
-        :param Path vasc_mask: a mask delineating a vascular ROI
-        :param iterable mid_times: an iterable of time values for each sample
-        :param str pet_units: a string indicating units used for PET data
-        :param int force: If true, run everything regardless of cache
-        :param int verbose: Set to non-zero to trigger logging, higher is more
-        :return:
+        :param Results results: A results object for reading and writing data
+        :return: results, with more data
     """
 
-    logger = logging.getLogger("STARE")
+    logger = results.logger
+    rpt_sect = results.report.begin_section("Partial volume correction")
 
     pre_pvc_timestamp = datetime.now()
     logger.info(f"Started PVC at {pre_pvc_timestamp}")
 
     # Create a path for our partial-volume data
-    fig_path = output_path / "anchoring" / "pvc"
+    fig_path = results.args.output_path / "anchoring" / "pvc"
     fig_path.mkdir(parents=True, exist_ok=True)
 
     # Perform PVC on each of the original volumes provided
     pvc_images = []
     pvc_exe = "/usr/local/bin/petpvc"
-    for img in images:
-        pvc_path = output_path / "anchoring" / "pvc" / f"pvc_{img.frame:02d}.nii.gz"
+    for img in results.volume_images:
+        pvc_path = results.args.output_path / "anchoring" / "pvc" /\
+                   f"pvc_{img.frame:02d}.nii.gz"
         full_command = [
             pvc_exe,
-            "-i", str(img.path / img.filename),  # {output_path}/orig/orig_01.nii.gz
-            "-o", str(pvc_path),  # {output_path}/anchoring/pvc/pvc_01.nii.gz
-            "-m", str(vasc_mask),  # {output_path}/anchoring/figs-masks/{best_mask}.nii.gz
+            "-i", str(img.path / img.filename),  # orig/orig_01.nii.gz
+            "-o", str(pvc_path),  # anchoring/pvc/pvc_01.nii.gz
+            "-m", str(results.best_vascular_mask_path),
             "-p", "STC",
-            "-x", f"{fwhm:0.1f}", "-y", f"{fwhm:0.1f}", "-z", f"{fwhm:0.1f}",
+            "-x", f"{results.args.fwhm:0.1f}",
+            "-y", f"{results.args.fwhm:0.1f}",
+            "-z", f"{results.args.fwhm:0.1f}",
         ]
-        if verbose:
+        if results.args.verbose:
             full_command = full_command + ["--debug", ]
         logger.debug("Running '" + " ".join(full_command) + "'")
-        if pvc_path.exists() and not force:
+        if pvc_path.exists() and not results.args.force:
             logger.warning(f"Skipping {str(pvc_path)}, it already exists.")
         else:
             p = subprocess.run(full_command, capture_output=True)
@@ -71,20 +65,21 @@ def correct_partial_volumes(
 
     # Collect all the 3d image data into a single 4d structure.
     combined_image = combine_volumes_into_4d(
-        pvc_images, output_path / "pvc.nii.gz", logger=logger
+        pvc_images, results.args.output_path / "pvc.nii.gz", logger=logger
     )
 
     # PET data should be in units of 'mCi'
     # If they already are, good, but other units get converted here.
     pet_4d_data = combined_image.get_fdata()
-    if pet_units.lower() == "kbq":
+    if results.args.pet_units.lower() == "kbq":
         pet_4d_data = pet_4d_data / 37000
-    elif pet_units.lower() == "bq":
+    elif results.args.pet_units.lower() == "bq":
         pet_4d_data = pet_4d_data / 37000000
 
     reshaped_pvc_data = flatten_4d_to_2d(pet_4d_data)
 
-    vascular_mask_data = nib.load(vasc_mask).get_fdata().astype(np.double)
+    vascular_mask_img = nib.load(results.best_vascular_mask_path)
+    vascular_mask_data = vascular_mask_img.get_fdata().astype(np.double)
     reshaped_vascular_mask_data = flatten_4d_to_2d(
         np.reshape(
             vascular_mask_data,
@@ -97,12 +92,46 @@ def correct_partial_volumes(
 
     masked_data = reshaped_pvc_data[reshaped_vascular_mask_data.ravel() == 1]
 
-    post_pvc_tac = TimeActivityCurve(
+    results.pvc_mean_vascular_tac = TimeActivityCurve(
         activity=np.mean(masked_data, axis=0),
-        timepoints=np.array(mid_times),
+        timepoints=np.array(results.mid_times),
+        missing_timepoints=results.ignored_mid_times,
         sd=np.std(masked_data, axis=0),
         source="pvc",
         name="pvc",
     )
 
-    return post_pvc_tac
+    pickle.dump(
+        results.pvc_mean_vascular_tac,
+        open(results.args.debug_path / "tac_pvc.pkl", "wb")
+    )
+    tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
+        results.args.output_path / "step_2_pvc_mean_tac.csv"
+    )
+    logger.info("WROTE step_2_pvc_mean_tac.csv to "
+                f"{str(results.args.output_path)}")
+
+    # Paint a picture of progress so far
+    tac_plot_data = [
+        results.best_centroid(step=1),
+        results.best_centroid(step=2),
+        results.pvc_mean_vascular_tac,
+    ]
+    tac_plot_palette = {
+        results.best_centroid(step=1).name: "blue",
+        results.best_centroid(step=2).name: "red",
+        results.pvc_mean_vascular_tac.name: "orange",
+    }
+    if results.plasma_tac is not None:
+        tac_plot_data.append(results.plasma_tac)
+        tac_plot_palette[results.plasma_tac.name] = "green"
+
+    fig_top_tacs = plot_detailed_tacs(
+        data=tac_plot_data,
+        title=f"Subject {results.args.subject} Vascular TACs",
+        palette=tac_plot_palette,
+    )
+    fig_top_tacs.savefig(results.args.fig_path / "step_2_four_tacs.png")
+
+    rpt_sect.end()
+    return results

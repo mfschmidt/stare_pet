@@ -1,27 +1,8 @@
 import os
-import sys
 import argparse
 import logging
-from datetime import datetime
 from pathlib import Path
-import nibabel as nib
-import pickle
-
-from .util import combine_volumes_into_4d, image_in_millicuries
-from .loader import get_tacs, get_images, get_mid_times, get_plasma
-from .clustering import two_step_clustering, best_of, \
-                        save_centroid_masks
-from .centroid_heuristics import find_vascular_centroids
-from .partial_volume import correct_partial_volumes
-from .fit_mean_tac import fit_vascular_mean_tac
-from .plotting import plot_detailed_tacs
-from .vascular_correction import tac_vascular_correction
-from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs, \
-                      plot_before_and_after_tacs
-from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
-from .plotting import plot_all_stare_tac_fits
-from .boot_anchor import boot_anchor
-from .minimize_cost import minimize_cost_function
+from multiprocessing import cpu_count
 
 
 def get_argument_parser():
@@ -61,7 +42,7 @@ def get_argument_parser():
     )
     parser.add_argument(
         "--fwhm", type=float, default=5.9,
-        help="Full width half maximum for ?",
+        help="Full width half maximum for partial volume correction",
     )
     parser.add_argument(
         "--tracer", type=str, default="FDG",
@@ -90,51 +71,19 @@ def get_argument_parser():
         help="set from 0 to 2 times to trigger more verbose output",
     )
     parser.add_argument(
+        "--debug", action="store_true",
+        help="If set, data will be pickled and saved to the debug directory.",
+    )
+    parser.add_argument(
         "--force", action="store_true",
         help="even if data are cached, recalculate and overwrite all output",
     )
+    parser.add_argument(
+        "--num-cpus", default="",
+        help="where parallel processing is supported, use this many processes",
+    )
 
     return parser
-
-
-def setup_logger(app_name, args):
-    """ Create a logger and configure it. """
-
-    # Set up a logger to handle output, and attach two handlers
-    logger = logging.getLogger(app_name)
-    logger.setLevel(logging.DEBUG)
-
-    # TODO: Add an html logger to write a report.
-    # TODO: See if a logger can intercept sklearn.KMeans verbose output
-
-    # Create a handler to write out to the terminal
-    # This handler adapts to the verbosity in the command line.
-    terminal_handler = logging.StreamHandler(sys.stdout)
-    terminal_handler.setFormatter(logging.Formatter(
-        fmt="%(asctime)s : %(message)s", datefmt="%I:%M:%S",
-    ))
-    if args.verbose > 1:
-        terminal_handler.setLevel(logging.DEBUG)
-    elif args.verbose > 0:
-        terminal_handler.setLevel(logging.INFO)
-    else:
-        terminal_handler.setLevel(logging.WARNING)
-    logger.addHandler(terminal_handler)
-
-    # Create a handler to write detailed information to a log file.
-    # This handler always captures all info, debug and higher
-    timestamp = datetime.now().strftime("%Y-%m-%d_%I-%M")
-    file_handler = logging.FileHandler(
-        Path(args.output_path) / f"stare_pet_{timestamp}.log"
-    )
-    file_handler.setFormatter(logging.Formatter(
-        fmt="%(asctime)s : %(levelname)s : %(message)s",
-        datefmt="%Y-%m-%d %I:%M:%S %p",
-    ))
-    file_handler.setLevel(logging.DEBUG)
-    logger.addHandler(file_handler)
-
-    return logger
 
 
 def validate_arguments(args):
@@ -186,7 +135,6 @@ def validate_arguments(args):
     args.cache_path.mkdir(parents=True, exist_ok=True)
 
     # Ensure we have regions to work with.
-    print("regions:", args.regions)
     if args.regions is None:
         # If not specified, use a default bucket of regions.
         setattr(args, "regions",
@@ -202,285 +150,24 @@ def validate_arguments(args):
     else:
         args.ignore_frames = [int(f) for f in args.ignore_frames]
 
-    # Set up a logger with handlers appropriate to the arguments provided.
-    logger = setup_logger("STARE", args)
-
-    # Log all arguments
-    logger.debug(f"Stare is running with these arguments.")
-    for k, v in vars(args).items():
-        spaces = " " * (23 - len(k))
-        logger.debug(f"  '{k}'{spaces}: {v}")
-    logger.info(f"The command issued: '{' '.join(sys.argv)}'")
+    # Interpret how many CPUs to use for multiprocessing.
+    if args.num_cpus == "":
+        setattr(args, "num_cpus", 1)
+    elif args.num_cpus == "max":
+        setattr(args, "num_cpus", cpu_count())
+    else:
+        setattr(args, "num_cpus", int(args.num_cpus))
 
     # Report the problems and quit if we have fatal errors.
     if len(errors) > 0:
         for error in errors:
-            logger.error(error)
+            print(error)
         return False
 
     # Good to continue on
     return True
 
 
-def stare(args):
-    """ The stare function validates the execution context,
-        then orchestrates the entire STARE pipeline.
+def make_pvc_tac(results):
 
-    :param args: The parsed argparse object
-
-    :return: 0 if successful, error code if not
-    :rtype: int
-    """
-
-    logger = logging.getLogger("STARE")
-
-    # Validate out_path argument
-    begin_timestamp = datetime.now()
-    logger.info(f"Begin STARE at {begin_timestamp}.")
-    ok_to_run = True
-
-    # Read PET data
-    tacs = get_tacs(
-        args.input_path, args.subject, args.regions, args.ignore_frames
-    )
-    if tacs is None:
-        logger.error("Failed to load TACs")
-        regions = None
-        ok_to_run = False
-    else:
-        if len(tacs.columns) < len(args.regions):
-            dropped_regions = [r for r in args.regions if r not in tacs.columns]
-            logger.warning("Specified regions were NOT found in the TACs:")
-            for region in dropped_regions:
-                logger.warning(f"   {region}")
-        regions = tacs.columns
-        logger.warning(f"Running with {len(regions)} regions:"
-                       f"    [{', '.join(regions)}]")
-
-    plasma_tac = get_plasma(
-        args.input_path, args.subject
-    )
-    if plasma_tac is None:
-        logger.warning("Failed to load plasma TAC. "
-                       "STARE will run, but cannot compare to plasma.")
-    if args.verbose > 0:
-        pickle.dump(
-            plasma_tac,
-            open(args.debug_path / "tac_plasma.pkl", "wb")
-        )
-
-    mid_times, ignored_mid_times = get_mid_times(
-        args.input_path, args.subject, args.ignore_frames
-    )
-    if mid_times is None:
-        logger.error("Failed to load midtimes")
-        ok_to_run = False
-
-    # I'd like to avoid this and just load one 4D image, but the PVC later
-    # requires each image independently, so we persist with loading them all.
-    # TODO: Handle loading one 4D or multiple 3D, then do the right thing w/PVC
-    orig_images = get_images(
-        args.input_path, args.output_path, args.subject, args.ignore_frames
-    )
-    if orig_images is None:
-        logger.error("Failed to load PET image data")
-        ok_to_run = False
-
-    # If we don't have what we need, don't even start.
-    if not ok_to_run:
-        logger.error("Unable to find sufficient data to run STARE.\n"
-                     "See previous errors above to determine what's missing.")
-        return 1
-
-    # Everything appears workable, start the modules.
-    # TODO: Every module gets passed 'args' and 'logger'.
-    #       We may need a layer between STARE code and library functions.
-    # Step 0. Format PET data
-
-    # Collect all the 3d image data into a single 4d structure.
-    combined_image = combine_volumes_into_4d(
-        orig_images, args.output_path / "orig.nii.gz", logger=logger
-    )
-    combined_template = combined_image.slicer[:, :, :, 0]
-
-    # Handle any requested axial clipping.
-    # if axial_slices_to_clip == zero, this will not affect the image.
-    # The header is updated along with the data.
-    cropped_image = combined_image.slicer[:, :, args.axial_slices_to_clip:, :]
-    nib.save(cropped_image, args.output_path / "orig_cropped.nii.gz")
-    logger.debug(f"WROTE orig_cropped.nii.gz ({cropped_image.shape}) "
-                 f"to {str(args.output_path)}")
-    cropped_template = cropped_image.slicer[:, :, :, 0]
-
-    # PET data should be in units of 'mCi'
-    mci_image = image_in_millicuries(cropped_image, args.pet_units)
-
-    # -------------------------------------------------------------------------
-    # Step 1. Run two-step vascular k-means clustering
-
-    centroids_step_1, centroids_step_2 = two_step_clustering(
-        mci_image,
-        step_one_ks=list(range(6, 40, 4)),
-        step_two_ks=[4, ],
-        mid_times=mid_times,
-        cache_path=args.cache_path,
-        cluster_function=find_vascular_centroids,
-        force=args.force,
-        verbose=args.verbose
-    )
-    # Plot the TACs from the first k-means step
-    fig = plot_vascular_tacs(centroids_step_1)
-    fig.savefig(args.fig_path / "step_1a_vascular_tacs.png")
-    fig = plot_vascular_tacs(centroids_step_2)
-    fig.savefig(args.fig_path / "step_1b_vascular_tacs.png")
-
-    # These data can be used to build custom plots or otherwise explore.
-    tacs_to_plottable_dataframe(centroids_step_1).to_csv(
-        args.output_path / "step_1a_kmeans_tac.csv"
-    )
-    logger.info(f"WROTE step_1a_kmeans_tac.csv to {str(args.output_path)}")
-    tacs_to_plottable_dataframe(centroids_step_2).to_csv(
-        args.output_path / "step_1b_kmeans_tac.csv"
-    )
-    logger.info(f"WROTE step_1b_kmeans_tac.csv to {str(args.output_path)}")
-
-    best_centroid_step_1 = best_of(centroids_step_1)
-    pickle.dump(
-        best_centroid_step_1,
-        open(args.output_path / "debug" / "tac_kmeans_step_1.pkl", "wb")
-    )
-    best_centroid_step_2 = best_of(centroids_step_2)
-    pickle.dump(
-        best_centroid_step_2,
-        open(args.output_path / "debug" / "tac_kmeans_step_2.pkl", "wb")
-    )
-    for centroid_list in [centroids_step_1, centroids_step_2, ]:
-        best_atlas = save_centroid_masks(
-            centroid_list, args.output_path / "masks",
-            cropped_template, combined_template,
-            axial_slices_to_clip=args.axial_slices_to_clip,
-            verbose=args.verbose
-        )
-    if best_atlas is None:
-        logger.error("Could not determine best centroid, cannot continue PVC.")
-        sys.exit(1)
-
-    # -------------------------------------------------------------------------
-    # Step 2. Correct partial volumes from vascular clustering
-
-    pvc_mean_tac = correct_partial_volumes(
-        orig_images,
-        args.fwhm,
-        args.output_path,
-        best_atlas,
-        mid_times=mid_times,
-        verbose=args.verbose,
-    )
-    pvc_mean_tac.missing_timepoints = ignored_mid_times
-    pickle.dump(
-        pvc_mean_tac,
-        open(args.output_path / "debug" / "tac_pvc.pkl", "wb")
-    )
-    tacs_to_plottable_dataframe([pvc_mean_tac, ]).to_csv(
-        args.output_path / "step_2_pvc_mean_tac.csv"
-    )
-    logger.info(f"WROTE step_2_pvc_mean_tac.csv to {str(args.output_path)}")
-
-    # Paint a picture of progress so far
-    fig_top_tacs = plot_detailed_tacs(
-        data=[
-            best_centroid_step_1,
-            best_centroid_step_2,
-            pvc_mean_tac,
-            # plasma_tac,
-        ],
-        title=f"Subject {args.subject} Vascular TACs",
-        palette={
-            best_centroid_step_1.name: "blue",
-            best_centroid_step_2.name: "red",
-            pvc_mean_tac.name: "orange",
-            # plasma_tac.name: "green",
-        },
-    )
-    fig_top_tacs.savefig(args.fig_path / "step_2_four_tacs.png")
-
-    # -------------------------------------------------------------------------
-    # Step 3. Correct TACs by extracting the mean signal from each cluster.
-    # Needs to know about ignored mid-times to weight durations appropriately
-    fit_tac, hires_fit_tac = fit_vascular_mean_tac(
-        pvc_mean_tac, args.fig_path,
-        debug_path=args.debug_path, cache_path=args.cache_path, force=False,
-        verbose=args.verbose > 0
-    )
-
-    # Then apply vascular correction
-    # vasc_corr_perc was hard-coded to 5 in the matlab wrapperStare.m
-    corrected_tacs = tac_vascular_correction(
-        tacs, regions, args.vasc_corr_pct, fit_tac
-    )
-    corrected_tacs.to_csv(
-        args.debug_path / "step_3_corrected_tacs.tsv", index=None, sep='\t'
-    )
-    fig = plot_before_and_after_tacs(
-        tacs, corrected_tacs, mid_times,
-    )
-    fig.savefig(args.fig_path / "step_3_vascular_corrected_tacs.png")
-
-    # -------------------------------------------------------------------------
-    # Step 4. Bootstrap randomized samples
-    #
-    curves, k_constants, kis, kde_peaks, ki_peaks = boot_anchor(
-        pvc_mean_tac, corrected_tacs, args.vasc_corr_pct,
-        tracer=args.tracer,
-        bootstrap_iterations=1000,
-        cache_path=args.cache_path,
-        debug_path=args.debug_path,
-        force=False,
-        verbose=args.verbose > 0
-    )
-    # Write plots to visualize the bootstrapping
-    # Plot densities of each constant
-    for i, k_const in enumerate(["k1", "k2", "k3", "ki"]):
-        fig = plot_bootstrap_constant(
-            corrected_tacs.columns,
-            kis if k_const == "ki" else k_constants[:, :, i],
-            k_const,
-            subject=args.subject,
-            tracer=args.tracer,
-        )
-        fig.savefig(
-            args.fig_path / f"step_4_bootstrap_{k_const}_density_by_region.png"
-        )
-
-    # Plot all bootstrap curves
-    fig = plot_bootstrap_curves(
-        curves, hires_fit_tac, pvc_mean_tac, args.subject
-    )
-    fig.savefig(args.fig_path / f"step_4_bootstrap_curves.png")
-
-    # -------------------------------------------------------------------------
-    # Step 5. Find best global parameters with simulated annealing
-
-    final_results = minimize_cost_function(
-        k_constants=k_constants,  # [26 x 6 x 3] doubles
-        mid_times=mid_times,
-        corrected_tacs=corrected_tacs,
-        weights=pvc_mean_tac.weights(),
-        region_weights=None,
-        uniform_vasc_tac=hires_fit_tac,
-        bootstrap_ki_peaks=ki_peaks,
-        out_path=args.output_path,
-        debug_path=args.debug_path,
-        subject=args.subject,
-    )
-    fig = plot_all_stare_tac_fits(
-        corrected_tacs, mid_times, final_results
-    )
-    fig.savefig(args.fig_path / f"step_5_final_fits.png")
-
-    # Output time and duration for those who care to benchmark
-    finish_timestamp = datetime.now()
-    logger.info(f"STARE is finished at {finish_timestamp}.")
-    logger.info(f"{finish_timestamp - begin_timestamp} elapsed.")
-
-    return 0
+    return results
