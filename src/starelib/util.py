@@ -117,17 +117,26 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
     return combined_image
 
 
-def explode_4d_into_volumes(image, out_path, name_template):
+def explode_4d_into_volumes(image, out_path, name_template, logger=None):
     """ Save individual 3d volumes from 4d image.
 
     :param image: 4d nifti image
     :param out_path: path to save separate volumes
     :param name_template: format string for naming volume files
+    :param logger: logger object for writing information
     :return: list of individual volumes
     """
 
     volumes = []
+    write_volumes = True
     nifti_vols = [image.slicer[:, :, :, t] for t in range(image.shape[3])]
+    existing_images = list(out_path.glob("*.nii.gz"))
+    if len(existing_images) >= len(nifti_vols):
+        write_volumes = False
+        if logger:
+            logger.info(f"found {len(existing_images)} volumes in {out_path}, "
+                        "not overwriting.")
+    # Whether we write or not, still split and keep in memory.
     for i, nifti_vol in enumerate(nifti_vols):
         image = Image(
             path=out_path,
@@ -136,7 +145,8 @@ def explode_4d_into_volumes(image, out_path, name_template):
             frame=i + 1,
             nifti=nifti_vol,
         )
-        nib.save(nifti_vol, image.path / image.filename)
+        if write_volumes:
+            nib.save(nifti_vol, image.path / image.filename)
         volumes.append(image)
 
     return volumes

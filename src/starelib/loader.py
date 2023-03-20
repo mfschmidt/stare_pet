@@ -45,12 +45,13 @@ def get_tsv_data(input_path, subject_id, contents, logger=None):
         return None
 
     data = None
+    actual_f = None
     subject_dir = Path(input_path) / subject_id
     for f in possible_names:
         actual_f = subject_dir / f
         if actual_f.exists():
             if data is None:
-                logger.info(f"Reading tacs file '{actual_f}'")
+                logger.info(f"Reading {contents.lower()} file '{actual_f}'")
                 data = pd.read_csv(
                     actual_f,
                     header=header, index_col=index_col, sep=sep, names=names,
@@ -58,7 +59,8 @@ def get_tsv_data(input_path, subject_id, contents, logger=None):
                 logger.debug(f"  {contents} data shaped {data.shape}")
             else:
                 logger.warning(f"Ignoring extra {contents} file '{actual_f}'")
-    return data
+
+    return data, actual_f
 
 
 def get_tacs(
@@ -73,16 +75,16 @@ def get_tacs(
     :return pandas.DataFrame: TACs
     """
 
-    tac_df = get_tsv_data(input_path, subject_id, "tacs")
+    tac_df, tac_file = get_tsv_data(input_path, subject_id, "tacs")
     if tac_df is None:
-        return None
+        return None, None
     good_regions = [r for r in regions if r in tac_df.columns]
     if frames_to_ignore is not None and len(frames_to_ignore) > 0:
         return tac_df.drop(
             np.asarray(frames_to_ignore) - 1, axis=0
-        )[good_regions]
+        )[good_regions], tac_file
     else:
-        return tac_df[good_regions]
+        return tac_df[good_regions], tac_file
 
 
 def get_plasma(input_path, subject_id):
@@ -93,19 +95,19 @@ def get_plasma(input_path, subject_id):
     :return pandas.DataFrame: A Centroid containing plasma activity
     """
 
-    plasma_data = get_tsv_data(input_path, subject_id, "plasma")
+    plasma_data, plasma_file = get_tsv_data(input_path, subject_id, "plasma")
     if plasma_data is None:
-        return None
+        return None, None
     if 'PlasRawY' in plasma_data.columns and 'PlasRawT' in plasma_data.columns:
         return TimeActivityCurve(
             activity=plasma_data['PlasRawY'].values.astype(float),
             timepoints=plasma_data['PlasRawT'].values.astype(float),
             source="plasma",
             name="plasma",
-        )
+        ), plasma_file
     else:
         # This should not happen
-        return None
+        return None, None
 
 
 def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
@@ -121,7 +123,7 @@ def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
     if logger is None:
         logger = logging.getLogger("STARE")
 
-    mid_times = get_tsv_data(
+    mid_times, mt_file = get_tsv_data(
         input_path, subject_id, "midtimes"
     )
     if (len(frames_to_ignore) > 0) and mid_times is not None:
@@ -139,9 +141,9 @@ def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
         ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
 
     if mid_times is not None and 't' in mid_times:
-        return mid_times['t'].values, ignored_mid_times['t'].values
+        return mid_times['t'].values, ignored_mid_times['t'].values, mt_file
     else:
-        return None, None
+        return None, None, None
 
 
 def get_individual_volumes(
@@ -201,6 +203,55 @@ def get_individual_volumes(
     return volumes
 
 
+def get_4D_data(
+        img_file, output_path, subject_id, frames_to_ignore,
+        section, logger=None
+):
+    """ Find images, a volume for each mid-time
+
+    :param img_file: path to a 4D image file
+    :param output_path: path to rewrite subjects
+    :param subject_id: name of subject folder
+    :param frames_to_ignore: list of frame numbers to avoid
+    :param section: report section for adding lines to the report
+    :param logger: where to send messages
+
+    :return dict: key-value dict with image data
+    """
+
+    # There's one 4D image to load and break up.
+    logger.info(f"Reading 4d image '{img_file}'")
+    combined_image = nib.load(img_file)
+    original_shape = combined_image.shape
+    logger.debug(f"  image contains {original_shape[3]} volumes.")
+    extra_sentence = "No volumes were ignored."
+    if len(frames_to_ignore) > 0:
+        chunks = []
+        begin = 0
+        for skipped in frames_to_ignore:
+            end = skipped - 1
+            chunks.append(combined_image.slicer[:, :, :, begin:end])
+            begin = skipped
+        chunks.append(combined_image.slicer[:, :, :, begin:])
+        combined_image = nib.concat_images(chunks, axis=3)
+        logger.debug(f"  image now contains {combined_image.shape[3]} volumes.")
+        extra_sentence = (f"After removing {len(frames_to_ignore)} volumes, "
+                          f"it contains {combined_image.shape[3]}.")
+
+    # Split the 4d data out into separate volumes.
+    volumes = explode_4d_into_volumes(
+        combined_image, output_path / "orig",
+        name_template=subject_id + "_{:02d}.nii.gz", logger=logger
+    )
+
+    section.add_line(f"Loaded PET data from '{img_file}'. "
+                     f"It contained {original_shape[3]} volumes, "
+                     f"each shaped {combined_image.shape[0:3]}."
+                     + extra_sentence)
+
+    return combined_image, volumes
+
+
 def gather_data(results):
     """ Manage the gathering of all input data on disk """
 
@@ -218,7 +269,7 @@ def gather_data(results):
     args = results.args
 
     # Read PET TAC data
-    tacs = get_tacs(
+    tacs, tacs_file = get_tacs(
         args.input_path, args.subject, args.regions, args.ignore_frames
     )
     if tacs is None:
@@ -232,22 +283,30 @@ def gather_data(results):
                 logger.warning(f"   {region}")
         logger.info(f"Running with {len(tacs.columns)} regions:"
                     f"    [{', '.join(tacs.columns)}]")
+        rpt_sect.add_line(f"Loaded TACs from '{tacs_file}'. "
+                          f"Using {len(tacs.columns)} regions.")
 
     # Find and load mid_times
-    mid_times, ignored_mid_times = get_mid_times(
+    mid_times, ignored_mid_times, mid_times_file = get_mid_times(
         args.input_path, args.subject, args.ignore_frames
     )
     if mid_times is None:
         logger.error("Failed to load midtimes")
         ok_to_run = False
+    else:
+        rpt_sect.add_line(f"Loaded mid_times from '{mid_times_file}'. "
+                          f"Running with {len(mid_times)} time points.")
 
     # Get plasma data if it's available, but this is not required.
-    plasma_tac = get_plasma(
+    plasma_tac, plasma_file = get_plasma(
         args.input_path, args.subject
     )
     if plasma_tac is None:
         logger.warning("Failed to load plasma TAC. "
                        "STARE will run fine, but cannot compare to plasma.")
+    else:
+        rpt_sect.add_line(f"Found plasma data in '{plasma_file}'.")
+
     if args.debug:
         pickle.dump(
             plasma_tac,
@@ -255,51 +314,56 @@ def gather_data(results):
         )
 
     # Load PET images
+    combined_image, volumes = None, None
+
     # The first preference is if there is already a cached 4D image.
     cached_img_file = args.output_path / "orig.nii.gz"
-    if cached_img_file.exists():
-        # There's one 4D image to load and break up.
-        logger.info(f"Reading 4d image '{cached_img_file}'")
-        combined_image = nib.load(cached_img_file)
-        logger.debug(f"  image contains {combined_image.shape[3]} volumes.")
-        # Split the 4d data out into separate volumes.
-        volumes = explode_4d_into_volumes(
-            combined_image, args.output_path,
-            name_template=args.subject + "_{:02d}.nii.gz"
+    if combined_image is None and cached_img_file.exists():
+        combined_image, volumes = get_4D_data(
+            cached_img_file, args.output_path, args.subject,
+            args.ignore_frames, rpt_sect, logger=logger
         )
-    else:
-        # Older FDG data are saved as one Analyze volume per time point.
-        # Newer data are saved as a single 4D nifti image.
-        # Future data will be BIDS-compliant.
-        # We need to support all of these, and also allow for PVC correction
-        # of individual volumes later.
-        moco_path = Path(args.input_path) / args.subject / "moco"
-        moco_images = list(moco_path.glob("*.hdr"))
-        moco_images.extend(list(moco_path.glob("*.nii")))
-        moco_images.extend(list(moco_path.glob("*.nii.gz")))
-        if len(moco_images) > 1:
-            # We can load a bunch of volumes.
-            volumes = get_individual_volumes(
-                args.input_path, args.output_path, args.subject,
-                args.ignore_frames, logger=logger
-            )
-            # Collect all the 3d image data into a single 4d structure.
-            combined_image = combine_volumes_into_4d(
-                volumes, args.output_path / "orig.nii.gz", logger=logger
-            )
-        elif len(moco_images) == 1:
-            # There's one 4D image to load and break up.
-            logger.info(f"Reading 4d image '{moco_images[0]}'")
-            combined_image = nib.load(moco_images[0])
-            logger.debug(f"  image contains {combined_image.shape[3]} volumes.")
-            # Split the 4d data out into separate volumes.
-            volumes = explode_4d_into_volumes(
-                combined_image, args.output_path,
-                name_template=results.subject + "{:03d}.nii.gz"
-            )
-        else:
-            # We don't know how to handle anything else.
-            volumes, combined_image = None, None
+
+    # The next preference is a 4D image from the PICNIC pipeline.
+    picnic_img_file = Path("/NOT_A_FILE.ext")
+    for img in args.input_path.glob(
+        "ses-{t}*_moco/out_file/ses-{t}*.nii.gz".format(t=args.tracer.lower())
+    ):
+        # There should only be one file (or none)
+        picnic_img_file = img
+    if combined_image is None and picnic_img_file.exists():
+        combined_image, volumes = get_4D_data(
+            picnic_img_file, args.output_path, args.subject,
+            args.ignore_frames, rpt_sect, logger=logger
+        )
+
+    # Older FDG data are saved as one Analyze volume per time point.
+    # Newer data are saved as a single 4D nifti image.
+    # Future data will be BIDS-compliant.
+    # We need to support all of these, and also allow for PVC correction
+    # of individual volumes later.
+    moco_path = Path(args.input_path) / args.subject / "moco"
+    moco_images = list(moco_path.glob("*.hdr"))
+    moco_images.extend(list(moco_path.glob("*.nii")))
+    moco_images.extend(list(moco_path.glob("*.nii.gz")))
+    if combined_image is None and len(moco_images) > 1:
+        # We can load a bunch of volumes.
+        volumes = get_individual_volumes(
+            args.input_path, args.output_path, args.subject,
+            args.ignore_frames, logger=logger
+        )
+        # Collect all the 3d image data into a single 4d structure.
+        combined_image = combine_volumes_into_4d(
+            volumes, args.output_path / "orig.nii.gz", logger=logger
+        )
+        rpt_sect.add_line(f"Loaded PET data from {len(moco_images)} moco files."
+                          f" They contained {combined_image.shape[3]} volumes, "
+                          f"each shaped {combined_image.shape[0:3]}.")
+    elif combined_image is None and len(moco_images) == 1:
+        combined_image, volumes = get_4D_data(
+            picnic_img_file, args.output_path, args.subject,
+            args.ignore_frames, rpt_sect, logger=logger
+        )
 
     if volumes is None:
         logger.error("Failed to load PET image data")
@@ -316,6 +380,9 @@ def gather_data(results):
     nib.save(cropped_image, args.output_path / "orig_cropped.nii.gz")
     logger.debug(f"WROTE orig_cropped.nii.gz ({cropped_image.shape}) "
                  f"to {str(args.output_path)}")
+    rpt_sect.add_line(f"Cropped {args.axial_slices_to_clip} slices from "
+                      "the inferior of each PET volume taking them to "
+                      f"{cropped_image.shape}.")
     # cropped_volumes = [cropped_image.slicer[:, :, :, i]
     #                    for i in range(cropped_image.shape[3])]
 
