@@ -4,6 +4,17 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.4.0, 2023-03-19
+
+- Implemented multiprocessing for simulated annealing
+- Implemented all relevant data storage inside results object
+- Each module adds information to an html report section.
+
+Version 0.3.0, 2023-01-01
+
+- Implemented simulated annealing
+- Implemented bootstrap model fitting
+
 Version 0.2.0, 2022-10-26
 
 - Implemented through vascular correction
