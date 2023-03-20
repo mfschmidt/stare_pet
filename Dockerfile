@@ -22,6 +22,7 @@ RUN cd /opt/ && \
     mkdir /opt/build_petpvc && cd /opt/build_petpvc && \
     cmake /opt/PETPVC && make && make install
 
+# STARE code is already downloaded/pulled to get this Dockerfile
 COPY . /stare_pet
 
 RUN pip install /stare_pet
