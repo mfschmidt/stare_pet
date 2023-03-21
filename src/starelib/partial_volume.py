@@ -31,7 +31,7 @@ def correct_partial_volumes(results):
     pvc_exe = "/usr/local/bin/petpvc"
     for img in results.volume_images:
         pvc_path = results.args.output_path / "anchoring" / "pvc" /\
-                   f"pvc_{img.frame:02d}.nii.gz"
+                   f"{results.args.subject}_pvc_{img.frame:02d}.nii.gz"
         full_command = [
             pvc_exe,
             "-i", str(img.path / img.filename),  # orig/orig_01.nii.gz
