@@ -17,13 +17,30 @@ are available via [github pages](https://mfschmidt.github.io/stare_pet/).
 
 ## Installation
 
-stare_pet is made available via pypi or this github repository.
+stare_pet is made available via pypi.
 
     pip install stare_pet
+
+or this github repository
+
+    git clone https://github.com/mfschmidt/stare_pet
+    pip install ./stare_pet
 
 or
 
     pip install git+https://github.com/mfschmidt/stare_pet.git#egg=stare_pet
+
+But it is dependent upon PETPVC, which you will need to have installed
+on the machine running stare_pet.
+An **alternative** is to run in docker,
+which already has the dependencies installed.
+
+    cd stare_pet
+    docker build . -t stare:my_local_version
+
+or
+
+    docker pull mfschmidt/stare:latest
 
 ## Usage
 
@@ -48,6 +65,11 @@ from there.
 You can get more options and documentation with help.
 
     stare --help
+
+Or **alternatively**, you can run in docker,
+with the same argument style as above.
+
+    stare_pet/stare-docker --help
 
 ### Jupyter Notebook
 
