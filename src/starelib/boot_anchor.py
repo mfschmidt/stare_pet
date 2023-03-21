@@ -123,6 +123,8 @@ def fit_curves(curves, vascular_tac, uniform_tac, verbose=True):
     }
     for i, curve in enumerate(curves):
 
+        # TODO: Put each curve in a queue, let multiple Processes handle them.
+
         # Let the function handle successes and failures and fitting.
         # It will return a list of 'success_limit' fits, so we [0] the only one.
         fits = find_curve_fits(
@@ -176,6 +178,8 @@ def fit_curves_to_regional_tacs(
     # Assess each fit curve as an adjuster to regional tacs
     num_good_rate_constants = 0
     for i, curve in enumerate(good_curves):
+
+        # TODO: Put each curve in a queue, let multiple Processes handle them.
 
         # Reset rate constants and bounds for each curve
         rate_constants = np.zeros((len(regions), num_2tc_params))
@@ -294,13 +298,8 @@ def find_2tc_bounds(rate_constants):
 
 def boot_anchor(results):
     """
-        pvc_mean_tac,  # contains activity, sd, times, index
-        corrected_regional_tacs,
-        vasc_corr_pct,
-        force=False,
-        verbose=False,
-
-    :return:
+        :param results: An object containing lots of data from the pipeline
+        :return:
     """
 
     logger = results.logger
@@ -314,7 +313,8 @@ def boot_anchor(results):
     num_2tc_params = 3
     if results.args.tracer != 'FDG':
         # Perhaps, in the future, reversible tracers can have 4 parameters.
-        raise ValueError("Tracer must be FDG. No others are yet supported.")
+        # raise ValueError("Tracer must be FDG. No others are yet supported.")
+        print("Tracer should be FDG. No others are officially supported.")
 
     # Generate a thousand curves, based on actual TAC plus random noise
     bootstrap_curves = gen_bootstrap_curves(
@@ -413,9 +413,13 @@ def boot_anchor(results):
     # Write plots to visualize the bootstrapping
     # Plot densities of each constant
     for i, k_const in enumerate(["k1", "k2", "k3", "ki"]):
+        if k_const == "ki":
+            rate_consts_for_plot = kis
+        else:
+            rate_consts_for_plot = results.bootstrap_rate_constants[:, :, i]
         fig = plot_bootstrap_constant(
             results.corrected_tacs.columns,
-            kis if k_const == "ki" else results.bootstrap_rate_constants[:,:,i],
+            rate_consts_for_plot,
             k_const,
             subject=results.args.subject,
             tracer=results.args.tracer,
