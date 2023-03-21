@@ -13,9 +13,14 @@ class StareResults(Results):
 
         # Data loaded from disk (some modified slightly)
         self.tacs = None  # previously extracted
+        self.original_tacs = None
+        self.source_tacs_path = None
         self.mid_times = None
+        self.original_mid_times = None
+        self.source_mid_times_path = None
         self.ignored_mid_times = None
         self.plasma_tac = None
+        self.source_plasma_tac_file = None
         self.input_4D = None
         self.cropped_4D = None
         self.volume_files = []
@@ -43,6 +48,7 @@ class StareResults(Results):
         self.bootstrap_ki_fwhm = None
 
         # Data from simulated annealing
+        self.annealer_bounds = None
         self.annealer_results = {}
         self.final_rate_df = None
 
