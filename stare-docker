@@ -5,7 +5,7 @@ HOST_GID=$(id -g)
 export HOST_UID
 export HOST_GID
 docker run -it \
-  --user "{$HOST_UID}:{$HOST_GID}" \
+  --user "${HOST_UID}:${HOST_GID}" \
   --workdir="${HOME}" \
   --volume="/etc/group:/etc/group:ro" \
   --volume="/etc/passwd:/etc/passwd:ro" \
