@@ -264,9 +264,8 @@ def find_2tc_bounds(rate_constants):
     # Assign STARE upper and lower bounds as either side of ksdensity FWHM
     # of the bootstrap samples.
 
-    dim_a, dim_b = rate_constants[0].shape
-
     # Bounds for k1, k2, k3 (for constraining STARE search space
+    dim_a, dim_b = rate_constants[0].shape
     bounds = np.zeros((dim_a, dim_b, 2))
     peaks = np.zeros((dim_a, dim_b, 2))
     fwhm = np.zeros((dim_a, dim_b, 3, 2))
@@ -369,6 +368,12 @@ def boot_anchor(results):
         to_cache(good_rate_constants, results.args.cache_path, cache_file)
     else:
         logger.info("  loading cached step 4b rate constants to save time")
+
+    if len(good_rate_constants) == 0:
+        logger.error("FAILURE: No curves could be fit!!")
+        rpt_sect.add_line("No curves were fit during bootstrapping!")
+        rpt_sect.end()
+        return results
 
     # Get upper and lower bounds for 2TCM parameters
     kde_bounds, kde_peaks, kde_fwhm = find_2tc_bounds(

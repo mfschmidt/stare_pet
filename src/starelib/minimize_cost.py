@@ -287,8 +287,14 @@ def minimize_parameter_cost(results):
     )
     if annealer_results is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
-        annealer_results = minimize_cost_function(results)
-        to_cache(annealer_results, results.args.cache_path, cache_file)
+        if results.bootstrap_rate_constants is None:
+            logger.info("Parameter cost minimization has nothing to work "
+                        "with and is not being run.")
+            rpt_sect.add_line("Parameter cost minimization has nothing to work"
+                              " with and is not being run.")
+        else:
+            annealer_results = minimize_cost_function(results)
+            to_cache(annealer_results, results.args.cache_path, cache_file)
     else:
         logger.info("  loaded cached step 4a curve fits to save time")
 
