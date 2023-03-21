@@ -4,7 +4,7 @@ from scipy.optimize import dual_annealing
 from datetime import datetime
 import multiprocessing as mp
 
-from src.starelib.fitting_models import solve_stttm
+from .fitting_models import solve_stttm
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_all_stare_tac_fits
 from .util import from_cache, to_cache
