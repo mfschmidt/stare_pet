@@ -156,7 +156,10 @@ def validate_arguments(args):
     elif args.num_cpus == "max":
         setattr(args, "num_cpus", cpu_count())
     else:
-        setattr(args, "num_cpus", int(args.num_cpus))
+        if int(args.num_cpus) > cpu_count():
+            setattr(args, "num_cpus", int(cpu_count()))
+        else:
+            setattr(args, "num_cpus", int(args.num_cpus))
 
     # Report the problems and quit if we have fatal errors.
     if len(errors) > 0:
