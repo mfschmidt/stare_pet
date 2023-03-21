@@ -16,7 +16,7 @@ from starelib.partial_volume import correct_partial_volumes
 from starelib.fit_mean_tac import fit_vascular_mean_tac
 from starelib.vascular_correction import tac_vascular_correction
 from starelib.boot_anchor import boot_anchor
-from starelib.minimize_cost import minimize_cost_function
+from starelib.minimize_cost import minimize_parameter_cost
 
 
 def main(parsed_args):
@@ -39,7 +39,7 @@ def main(parsed_args):
         results = fit_vascular_mean_tac(results)
         results = tac_vascular_correction(results)
         results = boot_anchor(results)
-        results = minimize_cost_function(results)
+        results = minimize_parameter_cost(results)
         results.end()
         results.write_report()
         return 0
