@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pickle
 from scipy.optimize import dual_annealing
 from datetime import datetime
 import multiprocessing as mp
@@ -8,6 +7,7 @@ import multiprocessing as mp
 from src.starelib.fitting_models import solve_stttm
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_all_stare_tac_fits
+from .util import from_cache, to_cache
 
 
 def cost_function(
@@ -115,15 +115,9 @@ def minimize_cost_function(results):
         :return: results, with additional data
     """
 
-    logger = results.logger
-    rpt_sect = results.report.begin_section("Simulated Annealing")
-
-    start_time = datetime.now()
-    logger.info(f"Starting simulated annealing at {start_time}")
-
     # Manual configuration
     # annealer always goes to max_iter, needs a callback for setting limits
-    max_iter = 100  # 20k is better, but is slow, about an hour per thousand.
+    max_iter = 5000  # 20k is better, but is slow, about an hour per 4 thousand.
     no_local_search = False
 
     # If we don't have a uniform set of timepoints for interpolation,
@@ -175,7 +169,6 @@ def minimize_cost_function(results):
             results.bootstrap_ki_fwhm[m, 1, 0]
             for m in range(len(results.bootstrap_ki_fwhm))
         ]
-        # TODO: Compare bootstrap_ki_fwhm to whatever matlab is using for peaks.
 
         # For multiprocessing, just set up arguments to call later in the pool
         mp_args_list.append(
@@ -213,10 +206,7 @@ def minimize_cost_function(results):
         proc.start()
         processes.append(proc)
     # All processes are now running separately.
-    # To avoid continuing on without results, we now wait for them to finish.
-    # for proc in processes:
-    #     proc.join()
-    #     print("process wrapped up")
+    # This process will continue without waiting until rslt_queue.get() below.
 
     print(f"  queue has {rslt_queue.qsize()} results")
 
@@ -230,12 +220,6 @@ def minimize_cost_function(results):
 
     print(f"Completed MP Queue at {datetime.now().strftime('%Y-%m-%d %I:%M')}")
     print(f"  queue has {rslt_queue.qsize()} results")
-
-    if results.args.debug_path is not None:
-        pickle.dump(
-            annealer_results,
-            open(results.args.debug_path / f"sa_results.pkl", "wb")
-        )
 
     # Save the rate constants in an accessible csv format.
     final_rate_header = []
@@ -274,16 +258,43 @@ def minimize_cost_function(results):
 
     fig = plot_all_stare_tac_fits(
         results.corrected_tacs, results.mid_times, annealer_results
-
     )
     fig.savefig(results.args.fig_path / f"step_5_final_fits.png")
+
+    results.annealer_bounds = sa_bounds
+    results.annealer_results = annealer_results
+    results.final_rate_df = final_rate_df
+
+    return results
+
+
+def minimize_parameter_cost(results):
+    """ Find parameters for each region in corrected_tacs
+
+        :param StareResults results: An object containing pipeline data
+        :return: results, with additional data
+    """
+
+    logger = results.logger
+    rpt_sect = results.report.begin_section("Simulated Annealing")
+
+    start_time = datetime.now()
+    logger.info(f"Starting simulated annealing at {start_time}")
+
+    cache_file = "step_5_minimized_params.pkl"
+    annealer_results = from_cache(
+        results.args.cache_path, cache_file, results.args.force
+    )
+    if annealer_results is None:
+        # pvc_mean_tac is only used for timepoints and weights, NOT activity
+        annealer_results = minimize_cost_function(results)
+        to_cache(annealer_results, results.args.cache_path, cache_file)
+    else:
+        logger.info("  loaded cached step 4a curve fits to save time")
 
     print("Finished simulated annealing at {}, after {}".format(
         datetime.now(), datetime.now() - start_time
     ))
-
-    results.annealer_results = annealer_results
-    results.final_rate_df = final_rate_df
 
     rpt_sect.end()
     return results
