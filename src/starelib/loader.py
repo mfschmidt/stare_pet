@@ -13,12 +13,13 @@ from .util import Image, image_in_millicuries,\
     combine_volumes_into_4d, explode_4d_into_volumes
 
 
-def get_tsv_data(input_path, subject_id, contents, logger=None):
+def get_tsv_data(input_path, subject_id, contents, tracer, logger=None):
     """ Find a tsv/txt file and read its data
 
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
     :param str contents: what kind of data is in the file
+    :param str tracer: what tracer was injected
     :param logger: where to send messages
     :return pandas.DataFrame: data
     """
@@ -26,78 +27,109 @@ def get_tsv_data(input_path, subject_id, contents, logger=None):
     if logger is None:
         logger = logging.getLogger("STARE")
 
-    # Set context for different types of data
+    # Set context for different types of data. These are the defaults.
     header = 0
     index_col = None
     sep = '\t'
     names = None
+    subject_dir = Path(input_path) / subject_id
     if contents.lower() == "tacs":
-        possible_names = [f"{subject_id}.TACs", "tacs.txt", ]
+        picnic_tacs = list(subject_dir.glob(
+            f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
+        ))
+        old_school_tacs = [subject_dir / f"{subject_id}.TACs", ]
+        alternate_tacs = [subject_dir / "tacs.txt", ]
+        possible_files = picnic_tacs + old_school_tacs + alternate_tacs
     elif contents.lower() == "plasma":
-        possible_names = [f"{subject_id}plasma.txt", "plasma.txt", ]
-    elif contents.lower() in ["midtimes", "mid-times", ]:
-        possible_names = [f"{subject_id}.raw.midtime.txt", "midtimes.txt", ]
-        header = None
-        names = ['t', ]
+        old_school_plasma = [subject_dir / f"{subject_id}plasma.txt", ]
+        alternate_plasma = [subject_dir / "plasma.txt", ]
+        possible_files = old_school_plasma + alternate_plasma
+    elif contents.lower() in ["midtimes", "mid-times", "mid_times", ]:
+        picnic_midtimes = list(subject_dir.glob(
+            f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
+        ))
+        old_school_times = [subject_dir / f"{subject_id}.raw.midtime.txt", ]
+        alternate_times = [subject_dir / "midtimes.txt", ]
+        possible_files = old_school_times + alternate_times + picnic_midtimes
     else:
         logger.error("I do not understand '{contents}' content.")
         logger.error("I can only load 'tacs', 'midtimes', or 'plasma'.")
-        return None
+        return None, None
 
-    data = None
-    actual_f = None
-    subject_dir = Path(input_path) / subject_id
-    for f in possible_names:
-        actual_f = subject_dir / f
-        if actual_f.exists():
+    f, data = None, None
+    for f in possible_files:
+        if f.exists():
             if data is None:
-                logger.info(f"Reading {contents.lower()} file '{actual_f}'")
+                # Load the first file found
+                logger.info(f"Reading {contents.lower()} file '{f}'")
+                if contents.lower() in ["midtimes", "mid-times", "mid_times"]:
+                    if f.name.endswith(".txt"):
+                        # For one-column naked text files, no header and 1 col
+                        header = None
+                        names = ['t', ]
                 data = pd.read_csv(
-                    actual_f,
-                    header=header, index_col=index_col, sep=sep, names=names,
+                    f, header=header, index_col=index_col,
+                    sep=sep, names=names,
                 )
+                if contents.lower() in ["midtimes", "mid-times", "mid_times"]:
+                    if f.name.endswith(".tsv"):
+                        # For PICNIC runs, we get mid-times from a TACs file
+                        data = pd.DataFrame(data.iloc[:, 0].rename('t'))
                 logger.debug(f"  {contents} data shaped {data.shape}")
             else:
-                logger.warning(f"Ignoring extra {contents} file '{actual_f}'")
+                # Ignore files found after we loaded the first
+                logger.warning(f"Ignoring extra {contents} file '{f}'")
 
-    return data, actual_f
+    if data is None:
+        return data, possible_files
+    else:
+        return data, f
 
 
-def get_tacs(
-        input_path, subject_id, regions, frames_to_ignore=None
-):
+def get_tacs(args, logger=None):
     """ Find a tacs file and read its data
 
-    :param input_path: path to find subjects
-    :param subject_id: name of subject folder
-    :param iterable regions: list of regions to include from loaded TACs
-    :param iterable frames_to_ignore: rows to drop from the loaded TACs
+    :param args: command line arguments
+    :param logger: logger to report out findings
     :return pandas.DataFrame: TACs
     """
 
-    tac_df, tac_file = get_tsv_data(input_path, subject_id, "tacs")
+    if logger is None:
+        logger = logging.getLogger("STARE")
+
+    tac_df, tac_file = get_tsv_data(
+        args.input_path, args.subject, "tacs", args.tracer, logger
+    )
     if tac_df is None:
-        return None, None
-    good_regions = [r for r in regions if r in tac_df.columns]
-    if frames_to_ignore is not None and len(frames_to_ignore) > 0:
-        return tac_df.drop(
-            np.asarray(frames_to_ignore) - 1, axis=0
-        )[good_regions], tac_file
+        return None, None, tac_file
+    good_regions = [r for r in args.regions if r in tac_df.columns]
+    if args.ignore_frames is not None and len(args.ignore_frames) > 0:
+        final_tac_df = tac_df.drop(
+            np.asarray(args.ignore_frames) - 1, axis=0
+        )
+        return tac_df, final_tac_df[good_regions], tac_file
     else:
-        return tac_df[good_regions], tac_file
+        return tac_df, tac_df[good_regions], tac_file
 
 
-def get_plasma(input_path, subject_id):
+def get_plasma(input_path, subject_id, tracer, logger=None):
     """ Find a plasma file and read its data
 
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
+    :param str tracer: what tracer was injected
+    :param logger: where to send messages
     :return pandas.DataFrame: A Centroid containing plasma activity
     """
 
-    plasma_data, plasma_file = get_tsv_data(input_path, subject_id, "plasma")
+    if logger is None:
+        logger = logging.getLogger("STARE")
+
+    plasma_data, plasma_file = get_tsv_data(
+        input_path, subject_id, "plasma", tracer, logger
+    )
     if plasma_data is None:
-        return None, None
+        return None, plasma_file
     if 'PlasRawY' in plasma_data.columns and 'PlasRawT' in plasma_data.columns:
         return TimeActivityCurve(
             activity=plasma_data['PlasRawY'].values.astype(float),
@@ -107,15 +139,18 @@ def get_plasma(input_path, subject_id):
         ), plasma_file
     else:
         # This should not happen
-        return None, None
+        return None, plasma_file
 
 
-def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
+def get_mid_times(
+        input_path, subject_id, frames_to_ignore, tracer, logger=None
+):
     """ Find a mid-times file and read its data
 
     :param input_path: path to find subjects
     :param subject_id: name of subject folder
     :param frames_to_ignore: ignored frames to cut from the list
+    :param str tracer: what tracer was injected
     :param logger: where to send messages
     :return tuple: array of raw mid-times, mid-times w/o ignored frames
     """
@@ -124,7 +159,7 @@ def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
         logger = logging.getLogger("STARE")
 
     mid_times, mt_file = get_tsv_data(
-        input_path, subject_id, "midtimes"
+        input_path, subject_id, "midtimes", tracer, logger
     )
     if (len(frames_to_ignore) > 0) and mid_times is not None:
         logger.warning(
@@ -134,16 +169,22 @@ def get_mid_times(input_path, subject_id, frames_to_ignore, logger=None):
             mid_times.index.isin([f - 1 for f in frames_to_ignore])
         ]
         # Replace mid_times AFTER the ignored time point has been stored.
-        mid_times = mid_times[
+        final_mid_times = mid_times[
             ~mid_times.index.isin([f - 1 for f in frames_to_ignore])
         ]
     else:
         ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
+        final_mid_times = mid_times
 
-    if mid_times is not None and 't' in mid_times:
-        return mid_times['t'].values, ignored_mid_times['t'].values, mt_file
+    if final_mid_times is not None and 't' in final_mid_times:
+        return (
+            mid_times['t'].values,
+            final_mid_times['t'].values,
+            ignored_mid_times['t'].values,
+            mt_file
+        )
     else:
-        return None, None, None
+        return None, None, None, mt_file
 
 
 def get_individual_volumes(
@@ -219,6 +260,9 @@ def get_4D_data(
     :return dict: key-value dict with image data
     """
 
+    if logger is None:
+        logger = logging.getLogger("STARE")
+
     # There's one 4D image to load and break up.
     logger.info(f"Reading 4d image '{img_file}'")
     combined_image = nib.load(img_file)
@@ -241,7 +285,7 @@ def get_4D_data(
     # Split the 4d data out into separate volumes.
     volumes = explode_4d_into_volumes(
         combined_image, output_path / "orig",
-        name_template=subject_id + "_{:02d}.nii.gz", logger=logger
+        name_template=subject_id + "_orig_{:02d}.nii.gz", logger=logger
     )
 
     section.add_line(f"Loaded PET data from '{img_file}'. "
@@ -258,22 +302,22 @@ def gather_data(results):
     logger = results.logger
     rpt_sect = results.report.begin_section("Gather Data")
 
-    results.logger.debug(f"{results.name} is running with these arguments.")
+    logger.debug(f"{results.name} is running with these arguments.")
     for k, v in vars(results.args).items():
         spaces = " " * (23 - len(k))
-        results.logger.debug(f"  '{k}'{spaces}: {v}")
-    results.logger.info(f"The command issued: '{' '.join(sys.argv)}'")
+        logger.debug(f"  '{k}'{spaces}: {v}")
+    logger.info(f"The command issued: '{' '.join(sys.argv)}'")
 
     # Assume everything's good until we encounter a problem.
     ok_to_run = True
     args = results.args
 
     # Read PET TAC data
-    tacs, tacs_file = get_tacs(
-        args.input_path, args.subject, args.regions, args.ignore_frames
-    )
+    full_tacs, tacs, tacs_file = get_tacs(results.args, logger)
     if tacs is None:
         logger.error("Failed to load TACs")
+        for failed_file in tacs_file:  # list of files if none are found
+            logger.error(f"  tried '{str(failed_file)}'")
         ok_to_run = False
     else:
         if len(tacs.columns) < len(args.regions):
@@ -286,24 +330,38 @@ def gather_data(results):
         rpt_sect.add_line(f"Loaded TACs from '{tacs_file}'. "
                           f"Using {len(tacs.columns)} regions.")
 
+    results.original_tacs = full_tacs
+    results.tacs = tacs
+    results.source_tacs_path = tacs_file
+
     # Find and load mid_times
-    mid_times, ignored_mid_times, mid_times_file = get_mid_times(
-        args.input_path, args.subject, args.ignore_frames
+    all_mid_times, mid_times, ignored_mid_times, mid_times_file = get_mid_times(
+        args.input_path, args.subject, args.ignore_frames,
+        args.tracer, logger=logger
     )
     if mid_times is None:
         logger.error("Failed to load midtimes")
+        for failed_file in mid_times_file:  # list of files if none are found
+            logger.error(f"  tried '{str(failed_file)}'")
         ok_to_run = False
     else:
         rpt_sect.add_line(f"Loaded mid_times from '{mid_times_file}'. "
                           f"Running with {len(mid_times)} time points.")
 
+    results.mid_times = mid_times
+    results.ignored_mid_times = ignored_mid_times
+    results.original_mid_times = all_mid_times
+    results.source_mid_times_path = mid_times_file
+
     # Get plasma data if it's available, but this is not required.
     plasma_tac, plasma_file = get_plasma(
-        args.input_path, args.subject
+        args.input_path, args.subject, args.tracer, logger=logger
     )
     if plasma_tac is None:
-        logger.warning("Failed to load plasma TAC. "
-                       "STARE will run fine, but cannot compare to plasma.")
+        logger.warning("Could not find any plasma TACs.")
+        for failed_file in plasma_file:  # list of files if none are found
+            logger.error(f"  tried '{str(failed_file)}'")
+        logger.warning("STARE doesn't need plasma, but plots it if available.")
     else:
         rpt_sect.add_line(f"Found plasma data in '{plasma_file}'.")
 
@@ -312,6 +370,9 @@ def gather_data(results):
             plasma_tac,
             open(args.debug_path / "tac_plasma.pkl", "wb")
         )
+
+    results.plasma_tac = plasma_tac
+    results.source_plasma_tac_file = plasma_file
 
     # Load PET images
     combined_image, volumes = None, None
@@ -326,7 +387,7 @@ def gather_data(results):
 
     # The next preference is a 4D image from the PICNIC pipeline.
     picnic_img_file = Path("/NOT_A_FILE.ext")
-    for img in args.input_path.glob(
+    for img in (args.input_path / args.subject).glob(
         "ses-{t}*_moco/out_file/ses-{t}*.nii.gz".format(t=args.tracer.lower())
     ):
         # There should only be one file (or none)
@@ -371,7 +432,7 @@ def gather_data(results):
     if not ok_to_run:
         logger.error("Unable to find sufficient data to run STARE.\n"
                      "See previous errors above to determine what's missing.")
-        return 1
+        sys.exit(1)  # No point continuing on
 
     # Handle any requested axial clipping.
     # if axial_slices_to_clip == zero, this will not affect the image.
@@ -390,10 +451,6 @@ def gather_data(results):
     mci_image = image_in_millicuries(cropped_image, args.pet_units)
 
     # Store the relevant data to results object.
-    results.tacs = tacs
-    results.mid_times = mid_times
-    results.ignored_mid_times = ignored_mid_times
-    results.plasma_tac = plasma_tac
     results.input_4D = combined_image
     results.cropped_4D = mci_image
     results.volume_images = volumes
