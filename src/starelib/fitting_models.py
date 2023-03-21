@@ -152,7 +152,7 @@ def get_initial_parameters(n=6, init_params=None):
 
 
 def find_curve_fits(f, x, y, sigmas=None,
-                    success_limit=10, failure_limit=8192, verbose=0):
+                    success_limit=10, failure_limit=8192):
     """ Find several options for fitting data to our model.
 
         :param function f: the curve to fit, returns a y for any x
@@ -161,7 +161,6 @@ def find_curve_fits(f, x, y, sigmas=None,
         :param ndarray sigmas: Optionally, provide uncertainty as SD
         :param success_limit: How many fits should be found and returned
         :param failure_limit: How many failures before we give up
-        :param int verbose: set to 1 to log minor details, 2 for all details
         :return: a list of dicts, each representing one fit curve
     """
 
@@ -235,8 +234,6 @@ def find_curve_fits(f, x, y, sigmas=None,
     logger.info(f"Of {num_attempts} attempts, "
                 f"{num_successes} converged and "
                 f"{num_failures} failed to converge.")
-    # TODO: Log more details, infinite, excessive RMS, failure to converge
-    # TODO: Only log details if verbose is > 1
 
     # In the case of success, this is a list of dicts.
     # In the case of failure, it is an empty list.
