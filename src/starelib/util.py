@@ -146,6 +146,7 @@ def explode_4d_into_volumes(image, out_path, name_template, logger=None):
             nifti=nifti_vol,
         )
         if write_volumes:
+            image.path.mkdir(parents=True, exist_ok=True)
             nib.save(nifti_vol, image.path / image.filename)
         volumes.append(image)
 
