@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 
 class Section:
@@ -22,6 +23,7 @@ class Section:
 
     def add_line(self, line):
         self.items.append(f"<p>{line}</p>\n")
+        self._report.logger.info(line)
 
     def add_figure(self, fig_path, caption):
         img_tag = f"<img src=\"{fig_path}\" style=\"width: 90%\">"
@@ -51,12 +53,16 @@ class Report:
     """ A class to keep track of events in time and write a final report.
     """
 
-    def __init__(self, title, dt_format="%Y-%m-%d_%I-%M"):
+    def __init__(self, title, logger=None, dt_format="%Y-%m-%d_%I-%M"):
         self._start_datetime = datetime.now()
         self._end_datetime = None
         self._dt_format = dt_format
         self.title = title
         self.sections = []
+        if logger is None:
+            self.logger = logging.getLogger(title)
+        else:
+            self.logger = logger
 
     def __str__(self):
         return "A report"
@@ -68,6 +74,7 @@ class Report:
     def begin_section(self, title):
         new_section = Section(title, self, dt_format=self._dt_format)
         self.sections.append(new_section)
+        self.logger.info(f"Started section '{title}'.")
         return new_section
 
     def write(self, file):
