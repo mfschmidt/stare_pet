@@ -287,7 +287,7 @@ def minimize_parameter_cost(results):
     )
     if annealer_results is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
-        if results.bootstrap_rate_constants is None:
+        if len(results.bootstrap_rate_constants) == 0:
             logger.info("Parameter cost minimization has nothing to work "
                         "with and is not being run.")
             rpt_sect.add_line("Parameter cost minimization has nothing to work"
