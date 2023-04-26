@@ -33,9 +33,9 @@ def gen_bootstrap_curves(
     # Generate a thousand curves, based on actual TAC plus random noise
     boot_curves = []
     for i in range(n):
-        # TODO: This is a uniform distribution, but perhaps a normal
+        # IDEA: This is a uniform distribution, but perhaps a normal
         #       distribution would be better weighted?
-        # TODO: More realistic, also, would be to restrict how far
+        # IDEA: More realistic, also, would be to restrict how far
         #       a given point @t can be from the previous point @t-1.
         random_noise = 2.0 * (randomizer(len(sample_mean)) - 0.5)
         scaled_deviation = random_noise * sample_sd
@@ -127,7 +127,7 @@ def fit_curves(curves, vascular_tac, uniform_tac, verbose=True):
 
         # Let the function handle successes and failures and fitting.
         # It will return a list of 'success_limit' fits, so we [0] the only one.
-        fits = find_curve_fits(
+        fits, curve_counts = find_curve_fits(
             decay_model, vascular_tac.post_peak_timepoints(), curve,
             sigmas=vascular_tac.post_peak_sigmas(),
             success_limit=1, failure_limit=256
@@ -255,7 +255,7 @@ def fit_curves_to_regional_tacs(
 def find_2tc_bounds(rate_constants):
     """ """
 
-    # We have up to 1000 sets of rate constants.
+    # We have up to 1000 sets of rate constants (dim 0 of rate_constants).
     # Use them to generate probability density functions,
     # then take the full width at half maximum (FWHM) of the PDF
     # to get the range of free parameters in STARE, and the penalty
@@ -264,11 +264,17 @@ def find_2tc_bounds(rate_constants):
     # Assign STARE upper and lower bounds as either side of ksdensity FWHM
     # of the bootstrap samples.
 
-    # Bounds for k1, k2, k3 (for constraining STARE search space
+    # Bounds for k1, k2, k3 (for constraining STARE search space)
+    # dim_a is usually 6 regions
+    # dim_b is usually 3 constants
+    # In matlab, this would just be an 18-len vector, 6 k1s 6 k2s 6 k3s.
     dim_a, dim_b = rate_constants[0].shape
-    bounds = np.zeros((dim_a, dim_b, 2))
+    # bounds = np.zeros((dim_a, dim_b, 2))
     peaks = np.zeros((dim_a, dim_b, 2))
     fwhm = np.zeros((dim_a, dim_b, 3, 2))
+
+    lower_bounds = np.zeros(dim_a * dim_b)
+    upper_bounds = np.zeros(dim_a * dim_b)
 
     for i in range(dim_a):
         for k in range(dim_b):
@@ -283,16 +289,18 @@ def find_2tc_bounds(rate_constants):
                                 if new_density_y[idx] > half_max]
 
             # Store the full-width-half-max values, and the peak with its index
-            bounds[i, k] = np.array(
-                [np.min(xs_over_half_max), np.max(xs_over_half_max), ]
-            )
+            lower_bounds[(k * dim_a) + i] = np.min(xs_over_half_max)
+            upper_bounds[(k * dim_a) + i] = np.max(xs_over_half_max)
+            # bounds[i, k] = np.array(
+            #     [np.min(xs_over_half_max), np.max(xs_over_half_max), ]
+            # )
             peak_idx = np.argmax(new_density_y)
             peaks[i, k] = np.array(
                 [new_density_x[peak_idx], new_density_y[peak_idx], ]
             )
             fwhm[i, k], _x, _y = get_kde_fwhm_points(rate_constants[:, i, k])
 
-    return bounds, peaks, fwhm
+    return lower_bounds, upper_bounds, peaks, fwhm
 
 
 def boot_anchor(results):
@@ -335,7 +343,7 @@ def boot_anchor(results):
     # Attempt to fit each bootstrap curve to the stacked exponential decay model
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
-    cache_file = "step_4_good_curves.pkl"
+    cache_file = "step-4_good_curves.pkl"
     good_curves = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -348,10 +356,12 @@ def boot_anchor(results):
         to_cache(good_curves, results.args.cache_path, cache_file)
     else:
         logger.info("  loaded cached step 4a curve fits to save time")
+    rpt_sect.add_line(f"From {bootstrap_iterations} random curves, "
+                      f"{len(good_curves)} good curves were found.")
 
     # Attempt to extract reasonable rate constants from each good curve
     # If prior rate constants were cached to disk, load them rather than running
-    cache_file = "step_4_rate_constants.pkl"
+    cache_file = "step-4_rate_constants.pkl"
     good_rate_constants = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -369,6 +379,9 @@ def boot_anchor(results):
     else:
         logger.info("  loading cached step 4b rate constants to save time")
 
+    rpt_sect.add_line(f"From {len(good_curves)} good curves, "
+                      f"{len(good_rate_constants)} good sets of "
+                      f"rate constants were found.")
     if len(good_rate_constants) == 0:
         logger.error("FAILURE: No curves could be fit!!")
         rpt_sect.add_line("No curves were fit during bootstrapping!")
@@ -376,12 +389,12 @@ def boot_anchor(results):
         return results
 
     # Get upper and lower bounds for 2TCM parameters
-    kde_bounds, kde_peaks, kde_fwhm = find_2tc_bounds(
+    kde_lower_bounds, kde_upper_bounds, kde_peaks, kde_fwhm = find_2tc_bounds(
         good_rate_constants,
     )
-    flattened_bounds = np.concatenate(
-        [kde_bounds[:, :, 0].ravel(), kde_bounds[:, :, 1].ravel(), ]
-    )
+    # flattened_bounds = np.concatenate(
+    #     [kde_bounds[:, :, 0].ravel(), kde_bounds[:, :, 1].ravel(), ]
+    # )
 
     # Split discovered boot constants into three parameters
     k1 = good_rate_constants[:, :, 0]
@@ -391,7 +404,7 @@ def boot_anchor(results):
     kis = np.multiply(k1, np.divide(k3, (k2 + k3)))
 
     ki_fwhm = np.zeros((len(results.corrected_tacs.columns), 3, 2))
-    for i in range(len(results.corrected_tacs.columns)):
+    for i in range(len(results.regions)):
         ki_fwhm[i], _x, _y = get_kde_fwhm_points(kis[:, i])
 
     # For recursive plotting fixes:
@@ -400,8 +413,8 @@ def boot_anchor(results):
             "regional_tacs": results.corrected_tacs,
             "good_rate_constants": good_rate_constants,
             "kis": kis,
-            "bounds": flattened_bounds,
-            "kde_bounds": kde_bounds,
+            "kde_lower_bounds": kde_lower_bounds,
+            "kde_upper_bounds": kde_upper_bounds,
             "kde_peaks": kde_peaks,
             "kde_fwhm": kde_fwhm,
             "ki_fwhm": ki_fwhm,
@@ -411,6 +424,8 @@ def boot_anchor(results):
         open(results.args.debug_path / "boot_anchor_data.pkl", "wb")
     )
 
+    results.kde_lower_bounds = kde_lower_bounds
+    results.kde_upper_bounds = kde_upper_bounds
     results.bootstrap_curves = good_curves
     results.bootstrap_rate_constants = good_rate_constants
     results.bootstrap_ki_fwhm = ki_fwhm
@@ -429,17 +444,23 @@ def boot_anchor(results):
             subject=results.args.subject,
             tracer=results.args.tracer,
         )
-        fig.savefig(
-            results.args.fig_path /
-            f"step_4_bootstrap_{k_const}_density_by_region.png"
-        )
+        figure_name = f"step-4_bootstrap_{k_const}_density_by_region.png"
+        fig.savefig(results.args.fig_path / figure_name)
+        caption = f"Bootstrapped rate constant boundaries for {k_const}"
+        rpt_sect.add_figure(results.args.fig_path / figure_name, caption)
 
     # Plot all bootstrap curves
     fig = plot_bootstrap_curves(
         results.bootstrap_curves, results.fitted_hires_tac,
         results.pvc_mean_vascular_tac, results.args.subject
     )
-    fig.savefig(results.args.fig_path / f"step_4_bootstrap_curves.png")
+    fig.savefig(results.args.fig_path / f"step-4_bootstrap_curves.png")
+
+    if results.args.debug:
+        pickle.dump(
+            results,
+            (results.args.cache_path / "step-4_results.pkl").open("wb")
+        )
 
     rpt_sect.end()
     return results
