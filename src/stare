@@ -22,7 +22,7 @@ from starelib.minimize_cost import minimize_parameter_cost
 def main(parsed_args):
     """ Entry point """
 
-    # Asking wrapper.arguments_valid to handle arguments allows it to
+    # Asking validate_arguments(parsed_args) to handle arguments allows it to
     # fill in defaults, check for consistency and validity, and
     # notify the caller of any problems. If anything does not look
     # right, it will return False, and we will quit rather than
