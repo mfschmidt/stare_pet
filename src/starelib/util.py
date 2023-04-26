@@ -117,16 +117,23 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
     return combined_image
 
 
-def explode_4d_into_volumes(image, out_path, name_template, logger=None):
+def explode_4d_into_volumes(
+        image, out_path, name_template, ignored_volumes=None,
+        cached=False, logger=None
+):
     """ Save individual 3d volumes from 4d image.
 
     :param image: 4d nifti image
     :param out_path: path to save separate volumes
     :param name_template: format string for naming volume files
+    :param list ignored_volumes: a list of volumes to pass over and not save
+    :param bool cached: True if loading a cached 4D image, missing volumes
     :param logger: logger object for writing information
     :return: list of individual volumes
     """
 
+    if ignored_volumes is None:
+        ignored_volumes = []
     volumes = []
     write_volumes = True
     nifti_vols = [image.slicer[:, :, :, t] for t in range(image.shape[3])]
@@ -137,12 +144,20 @@ def explode_4d_into_volumes(image, out_path, name_template, logger=None):
             logger.info(f"found {len(existing_images)} volumes in {out_path}, "
                         "not overwriting.")
     # Whether we write or not, still split and keep in memory.
+    ignored_volume_spacer = 0
     for i, nifti_vol in enumerate(nifti_vols):
+        if i + 1 in ignored_volumes:
+            if cached:
+                # skip a volume number, it wasn't in the 4D image anyway
+                ignored_volume_spacer += 1
+            else:
+                # pass over the volume, it is in the 4D image, but not usable
+                continue
         image = Image(
             path=out_path,
-            filename=name_template.format(i + 1),
+            filename=name_template.format(i + 1 + ignored_volume_spacer),
             prefix="orig",
-            frame=i + 1,
+            frame=i + 1 + ignored_volume_spacer,
             nifti=nifti_vol,
         )
         if write_volumes:
