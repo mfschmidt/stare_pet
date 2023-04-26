@@ -3,6 +3,7 @@ import pandas as pd
 from scipy.optimize import dual_annealing
 from datetime import datetime
 import multiprocessing as mp
+import pickle
 
 from .fitting_models import solve_stttm
 from .timeactivitycurve import TimeActivityCurve
@@ -19,7 +20,7 @@ def cost_function(
         :param np.array x: parameter estimates, in a 1D [regions * ks] array
         :param int src_idx: which column of x0 is source, all else target
         :param source_tac: Corrected Time Activity Curve for source
-        :param uniform_tac: Time Activity Curve at uniform hi res
+        :param uniform_tac: Time Activity Curve at uniform hi-res
         :param np.array region_weights: Weights to modify each region's cost
         :param np.array weights: Weights relative to each time point's duration
         :param pd.DataFrame target_tacs: Corrected TACs for each region
@@ -35,6 +36,29 @@ def cost_function(
 
 def worker(arg_tuple):
     """ the wrapper function designed to be run in parallel pools """
+
+    # Provide a place for the callback to store intermediate annealing data
+    global_annealer_data = []
+
+    def annealer_callback(x, f, context):
+        """ Monitor annealer progress and decide when to quit.
+
+            :param x: best parameters so far
+            :param f: cost of result from the best parameters so far
+            :param context: why the callback was called
+        """
+
+        if len(global_annealer_data) > 0:
+            delta = global_annealer_data[-1].get('f', 0.000) - f
+        else:
+            delta = f
+        data_dict = {"f": f, "delta": delta, "context": context}
+        for i, p in enumerate(x):
+            data_dict[f"x{i + 1:00d}"] = p
+        global_annealer_data.append(data_dict)
+
+        # Return false to continue, true to stop with adequate results
+        return False
 
     # Workers get a single argument, so we must pack things into a tuple.
     # This order must match exactly the order where they're packed in.
@@ -55,6 +79,7 @@ def worker(arg_tuple):
         maxiter=max_iter,  # matlab uses Inf, we can maybe adjust this later
         initial_temp=init_temp,  # matlab default is 100, python default is 5230
         no_local_search=no_local_search,  # see stats.stackexchange.com
+        callback=annealer_callback,  # Monitors and decides when to quit
         x0=x0,  # Our suggestion for a starting point
     )
 
@@ -89,6 +114,8 @@ def worker(arg_tuple):
         "max_iter": max_iter,
         "init_temp": init_temp,
         "no_local_search": no_local_search,
+        "sa_progress": global_annealer_data,
+        "elapsed_time": worker_end - worker_start,
     }
 
 
@@ -108,16 +135,18 @@ def queue_consumer(task_q, rslt_q, pid):
     print(f"  process {pid} consumed a None and is exiting.")
 
 
-def minimize_cost_function(results):
+def minimize_cost_function(results, max_iter=6000, x0=None):
     """ Find parameters for each region in corrected_tacs
 
         :param StareResults results: An object containing pipeline data
+        :param max_iter: Override the number of annealing iterations
+        :param x0: x0 is randomized between bounds, but can be overridden here.
         :return: results, with additional data
     """
 
     # Manual configuration
     # annealer always goes to max_iter, needs a callback for setting limits
-    max_iter = 5000  # 20k is better, but is slow, about an hour per 4 thousand.
+    max_iter = max_iter  # 20k is better, but is slow, about an hour per 5k.
     no_local_search = False
 
     # If we don't have a uniform set of timepoints for interpolation,
@@ -139,19 +168,15 @@ def minimize_cost_function(results):
     # Weights by TR have already been calculated
     w = results.pvc_mean_vascular_tac.weights()
 
-    # Generate candidate parameters within bootstrap ranges
-    # These are unraveled in 'F' Fortran order to match matlab's 18-item arrays.
-    # So x0 will have a 1D 18-item array of 6 k1, 6 k2, 6 k3
-    lo_bounds = np.ravel(
-        np.min(results.bootstrap_rate_constants, axis=0), order='F'
-    )
-    hi_bounds = np.ravel(
-        np.max(results.bootstrap_rate_constants, axis=0), order='F'
-    )
-    randomness = np.random.random(size=lo_bounds.shape)
-    x0 = lo_bounds + (hi_bounds - lo_bounds) * randomness
-    sa_bounds = [(lo_bounds[i], hi_bounds[i]) for i in range(len(lo_bounds))]
-    # x0 is now a [num_regions x num_ks] ndarray of candidate parameters
+    # If x0 was overridden in the function call, we can use it.
+    if x0 is None:
+        # By default, we expect to generate our own randomized starting params.
+        randomness = np.random.random(size=results.kde_lower_bounds.shape)
+        bounds_ranges = results.kde_upper_bounds - results.kde_lower_bounds
+        x0 = results.kde_lower_bounds + bounds_ranges * randomness
+
+    sa_bounds = [(results.kde_lower_bounds[i], results.kde_upper_bounds[i])
+                 for i in range(len(results.kde_lower_bounds))]
 
     annealer_results = {}
     mp_args_list = []
@@ -221,6 +246,7 @@ def minimize_cost_function(results):
     print(f"Completed MP Queue at {datetime.now().strftime('%Y-%m-%d %I:%M')}")
     print(f"  queue has {rslt_queue.qsize()} results")
 
+    # TODO: Package up lines 250-282 into a "package_rate_constants" function
     # Save the rate constants in an accessible csv format.
     final_rate_header = []
     for k in ["1", "2", "3", "i", ]:
@@ -259,7 +285,7 @@ def minimize_cost_function(results):
     fig = plot_all_stare_tac_fits(
         results.corrected_tacs, results.mid_times, annealer_results
     )
-    fig.savefig(results.args.fig_path / f"step_5_final_fits.png")
+    fig.savefig(results.args.fig_path / f"step-5_final_fits.png")
 
     results.annealer_bounds = sa_bounds
     results.annealer_results = annealer_results
@@ -281,11 +307,11 @@ def minimize_parameter_cost(results):
     start_time = datetime.now()
     logger.info(f"Starting simulated annealing at {start_time}")
 
-    cache_file = "step_5_minimized_params.pkl"
-    annealer_results = from_cache(
+    cache_file = "step-5_minimized_params.pkl"
+    sa_results = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if annealer_results is None:
+    if sa_results is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
         if len(results.bootstrap_rate_constants) == 0:
             logger.info("Parameter cost minimization has nothing to work "
@@ -293,14 +319,32 @@ def minimize_parameter_cost(results):
             rpt_sect.add_line("Parameter cost minimization has nothing to work"
                               " with and is not being run.")
         else:
-            annealer_results = minimize_cost_function(results)
-            to_cache(annealer_results, results.args.cache_path, cache_file)
+            sa_results = minimize_cost_function(results)
+            to_cache(sa_results, results.args.cache_path, cache_file)
     else:
-        logger.info("  loaded cached step 4a curve fits to save time")
+        logger.info("  loaded cached step 5 curve fits to save time")
+
+    if sa_results.args.debug:
+        pickle.dump(
+            sa_results,
+            (sa_results.args.cache_path / "step-5_results.pkl").open("wb")
+        )
 
     print("Finished simulated annealing at {}, after {}".format(
         datetime.now(), datetime.now() - start_time
     ))
 
+    num_regions = len(sa_results.regions)
+    for idx, region in enumerate(sa_results.regions):
+        src_params = sa_results.annealer_results[idx]['result'].x
+        k1 = src_params[(0 * num_regions) + idx]
+        k2 = src_params[(1 * num_regions) + idx]
+        k3 = src_params[(2 * num_regions) + idx]
+        rpt_sect.add_line(
+            f"{sa_results.regions[idx]}: "
+            f"ki = {np.multiply(k1, np.divide(k3, (k2 + k3)))}; "
+            f"k1 = {k1:0.4f}; k2 = {k2:0.4f}; k3 = {k3:0.4f}."
+        )
+
     rpt_sect.end()
-    return results
+    return sa_results
