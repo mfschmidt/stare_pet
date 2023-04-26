@@ -23,3 +23,10 @@ class Centroid(TimeActivityCurve):
         self.labels = labels  # ndarray shaped like (1000000,)
         self.best_in_k = best_in_k
         self.best_overall = best_overall
+
+    def __str__(self):
+        return "Centroid {} of k={}{}{}".format(
+            self.label, self.k,
+            f" (best in k={self.k})" if self.best_in_k else "",
+            f" (best overall)" if self.best_overall else "",
+        )
