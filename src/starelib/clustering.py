@@ -2,6 +2,7 @@ from pathlib import Path
 import numpy as np
 import logging
 import nibabel as nib
+from nilearn import image
 from datetime import datetime
 import pickle
 
@@ -9,10 +10,13 @@ from .util import flatten_4d_to_2d, reshape_labels_to_3d
 from .util import from_cache, to_cache
 from .centroid import Centroid
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
+from .plotting import plot_top_centroids_atlas
 from .centroid_heuristics import find_vascular_centroids
 
 
-def make_atlas_and_mask(centroid, template_img, pad_inferior=0, out_path=None):
+def make_atlas_and_mask(
+        centroid, template_img, pad_inferior=0, out_path=None, file_desc=None
+):
     """ Save a centroid's cluster as a mask.
 
         This function intentionally saves the mask as-is, meaning if
@@ -26,6 +30,7 @@ def make_atlas_and_mask(centroid, template_img, pad_inferior=0, out_path=None):
                              edge of the volume, for reversing the crop
     :param Path out_path: If provided, directory for writing out atlas and mask
                           By default, these are not written to disk
+    :param str file_desc: If provided, filename is overridden
     :return: paths to atlas image and mask image
     """
 
@@ -67,8 +72,13 @@ def make_atlas_and_mask(centroid, template_img, pad_inferior=0, out_path=None):
     space = "_orig" if pad_inferior > 0 else ""
     atlas_filename = f"cluster_k-{k:02d}_atlas{space}.nii.gz"
     mask_filename = f"cluster_k-{k:02d}_label-{label:02d}_mask{space}.nii.gz"
+    if file_desc is not None:
+        # Override the default file names
+        atlas_filename = f"cluster_{file_desc}_atlas{space}.nii.gz"
+        mask_filename = f"cluster_{file_desc}_mask{space}.nii.gz"
     if out_path is None:
         logger.debug(f"Made atlas & mask for k={k:02d}, label={label:02d}")
+        return cluster_atlas_img, cluster_mask_img
     else:
         if not (out_path / atlas_filename).exists():
             nib.save(cluster_atlas_img, out_path / atlas_filename)
@@ -76,8 +86,7 @@ def make_atlas_and_mask(centroid, template_img, pad_inferior=0, out_path=None):
             nib.save(cluster_mask_img, out_path / mask_filename)
         logger.debug(f"Made and saved atlas & mask for k={k:02d}, "
                      f"label={label:02d}")
-
-    return out_path / mask_filename
+        return out_path / atlas_filename, out_path / mask_filename
 
 
 def best_of(centroids):
@@ -113,14 +122,16 @@ def save_centroid_masks(centroids, mask_output_path,
         if centroid.best_overall:
             # Write the best atlas and mask to disk regardless of verbosity.
             # Specifying out_path causes masks to be written to disk.
-            best_mask_path = make_atlas_and_mask(
-                centroid, current_template, out_path=mask_output_path
+            best_atlas_path, best_mask_path = make_atlas_and_mask(
+                centroid, current_template,
+                out_path=mask_output_path, file_desc="best"
             )
             # Add back the cropped axial slices and save image in original space
             if axial_slices_to_clip > 0:
-                best_mask_path = make_atlas_and_mask(
+                best_atlas_path, best_mask_path = make_atlas_and_mask(
                     centroid, original_template,
-                    pad_inferior=axial_slices_to_clip, out_path=mask_output_path
+                    pad_inferior=axial_slices_to_clip,
+                    out_path=mask_output_path, file_desc="best"
                 )
         if verbose > 1:  # for all centroids, not just the best one
             # Specifying out_path causes masks to be written to disk.
@@ -137,7 +148,7 @@ def save_centroid_masks(centroids, mask_output_path,
 
 def cluster(results, cluster_function, data, ks, step):
     # If prior models were saved to disk, load them rather than running.
-    cache_file = f"step_{step}_centroids_and_fits.pkl"
+    cache_file = f"step-1-{step}_centroids_and_fits.pkl"
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -205,6 +216,7 @@ def two_step_cluster(results):
     # -------------------------------------------------------------------------
 
     cluster(results, cluster_function, to_cluster, step_one_ks, 1)
+    rpt_sect.add_line(str(best_of(results.cluster_centroids[1])))
 
     # -------------------------------------------------------------------------
     # Step 2. Find the best candidate from step 1 for a vascular cluster of
@@ -228,23 +240,42 @@ def two_step_cluster(results):
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
     cluster(results, cluster_function, top_centroid_masked_data, step_two_ks, 2)
+    rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
+
+    # Plot the top centroids over PET data, and add it to the report.
+    pet_avg_img = image.mean_img(results.cropped_4D)
+    best_atlases, best_masks = {}, {}
+    for step in [1, 2]:
+        best_atlases[step], best_masks[step] = make_atlas_and_mask(
+            best_of(results.cluster_centroids[step]), pet_avg_img
+        )
+    top_centroid_fig = plot_top_centroids_atlas(
+        best_masks[1], best_masks[2], pet_avg_img,
+    )
+    filename = f"step-1-vascular_cluster_masks.png"
+    top_centroid_fig.savefig(results.args.fig_path / filename)
+    caption = "Step one (orange) and step two (red) vascular clusters"
+    rpt_sect.add_figure(results.args.fig_path / filename, caption)
 
     # Plot the TACs from the first k-means step
     for step in [1, 2, ]:
         # Plot the TACs from vascular cluster centroids.
         fig = plot_vascular_tacs(results.cluster_centroids[step])
-        filename = f"step_1_{step}_vascular_tacs.png"
+        filename = f"step-1-{step}_vascular_tacs.png"
         fig.savefig(results.args.fig_path / filename)
         logger.info(f"WROTE {filename} to {str(results.args.fig_path)}")
 
+        caption = f"K-Means Vascular Clustering, Step {step}."
+        rpt_sect.add_figure(results.args.fig_path / filename, caption)
+
         # These data can be used to build custom plots or otherwise explore.
-        filename = f"step_1_{step}_kmeans_tac.csv"
+        filename = f"step-1-{step}_kmeans_tac.csv"
         tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
             results.args.output_path / filename
         )
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
-        filename = f"step_1_{step}_kmeans_centroid.pkl"
+        filename = f"step-1-{step}_kmeans_centroid.pkl"
         pickle.dump(
             best_of(results.cluster_centroids[step]),
             open(results.args.output_path / "debug" / filename, "wb")
@@ -258,7 +289,7 @@ def two_step_cluster(results):
             axial_slices_to_clip=results.args.axial_slices_to_clip,
             verbose=results.args.verbose
         )
-        results.best_vascular_mask_path = best_vascular_mask_path
+        results.best_vascular_mask_path[step] = best_vascular_mask_path
 
     rpt_sect.end()
     return results
