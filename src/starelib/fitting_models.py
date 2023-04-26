@@ -237,18 +237,18 @@ def find_curve_fits(f, x, y, sigmas=None,
 
     # In the case of success, this is a list of dicts.
     # In the case of failure, it is an empty list.
-    return successes
+    return successes, (num_successes, num_failures, num_attempts)
 
 
 def source_to_target_tissue_model(
         src_ks, tgt_ks, source_tac, uniform_tac
 ):
-    """
+    """ The primary model for rotating source-to-target parameter estimates
 
         :param np.array src_ks: parameter estimates, in a [ks] array
         :param np.array tgt_ks: parameter estimates, in a [regions x ks] array
         :param np.array source_tac: Corrected Time Activity Curve for source
-        :param np.array uniform_tac: Time Activity Curve at uniform hi res
+        :param np.array uniform_tac: Time Activity Curve at uniform hi-res
 
         st2model needs k1, k2, k3 from each region (6 regions -> 18 ks)
         one of six is source, the other five are target
