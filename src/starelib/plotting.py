@@ -2,9 +2,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.lines as lines
+from matplotlib.colors import ListedColormap
 import seaborn as sns
 import numpy as np
 from pathlib import Path
+import nibabel as nib
+from nilearn import image
+from nilearn.plotting import plot_roi
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
@@ -142,6 +146,26 @@ def prep_data(data):
     else:
         raise TypeError("prep_data can handle DataFrame objects or lists "
                         f"of TimeActivityCurve objects, but not {type(data)}.")
+
+
+def plot_top_centroids_atlas(
+        step_1_mask_img, step_2_mask_img, pet4d_img, figsize=(8, 4)
+):
+    """ Plot the PET average background and masks over the top.
+
+    """
+
+    mean_pet_img = image.mean_img(pet4d_img)
+    atlas_combo_img = nib.Nifti1Image(
+        step_1_mask_img.get_fdata() + step_2_mask_img.get_fdata(),
+        affine=mean_pet_img.affine, dtype=np.uint8,
+    )
+    two_grade_cmap = ListedColormap(['orange', 'red', ])
+    fig, axes = plt.subplots(figsize=figsize)
+    plot_roi(roi_img=atlas_combo_img, bg_img=mean_pet_img,
+             cmap=two_grade_cmap, black_bg=False, axes=axes,)
+
+    return fig
 
 
 def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
