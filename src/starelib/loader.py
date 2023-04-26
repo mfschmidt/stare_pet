@@ -232,7 +232,7 @@ def get_individual_volumes(
                 # copy of each image as a Nifti1 nii.gz for consistency
                 # throughout the pipeline.
                 nifti_img = nib.Nifti1Image(img.get_fdata(), img.affine)
-                nifti_file = orig_dir / f"orig_{i + 1:02d}.nii.gz"
+                nifti_file = orig_dir / f"{subject_id}_orig_{i + 1:02d}.nii.gz"
                 nib.save(nifti_img, str(nifti_file))
                 volumes.append(Image(
                     path=nifti_file.parent,
@@ -246,7 +246,7 @@ def get_individual_volumes(
 
 def get_4D_data(
         img_file, output_path, subject_id, frames_to_ignore,
-        section, logger=None
+        section, cached=False, logger=None
 ):
     """ Find images, a volume for each mid-time
 
@@ -255,6 +255,7 @@ def get_4D_data(
     :param subject_id: name of subject folder
     :param frames_to_ignore: list of frame numbers to avoid
     :param section: report section for adding lines to the report
+    :param bool cached: True if from a cached image missing ignored volumes
     :param logger: where to send messages
 
     :return dict: key-value dict with image data
@@ -268,29 +269,38 @@ def get_4D_data(
     combined_image = nib.load(img_file)
     original_shape = combined_image.shape
     logger.debug(f"  image contains {original_shape[3]} volumes.")
-    extra_sentence = "No volumes were ignored."
-    if len(frames_to_ignore) > 0:
-        chunks = []
-        begin = 0
-        for skipped in frames_to_ignore:
-            end = skipped - 1
-            chunks.append(combined_image.slicer[:, :, :, begin:end])
-            begin = skipped
-        chunks.append(combined_image.slicer[:, :, :, begin:])
-        combined_image = nib.concat_images(chunks, axis=3)
-        logger.debug(f"  image now contains {combined_image.shape[3]} volumes.")
-        extra_sentence = (f"After removing {len(frames_to_ignore)} volumes, "
-                          f"it contains {combined_image.shape[3]}.")
+    if cached:
+        # We must assume the volume has skipped any 'frames-to-ignore' already
+        extra_sentence = "Assumed volumes [{}] not present in cached 4D".format(
+            ", ".join([str(_) for _ in frames_to_ignore])
+        )
+    else:
+        extra_sentence = "No volumes were ignored."
+        if len(frames_to_ignore) > 0:
+            chunks = []
+            begin = 0
+            for skipped in frames_to_ignore:
+                end = skipped - 1
+                chunks.append(combined_image.slicer[:, :, :, begin:end])
+                begin = skipped
+            chunks.append(combined_image.slicer[:, :, :, begin:])
+            combined_image = nib.concat_images(chunks, axis=3)
+            logger.debug(f"  image now contains {combined_image.shape[3]} volumes.")
+            extra_sentence = (f"After removing {len(frames_to_ignore)} volumes, "
+                              f"it contains {combined_image.shape[3]}.")
 
     # Split the 4d data out into separate volumes.
     volumes = explode_4d_into_volumes(
         combined_image, output_path / "orig",
-        name_template=subject_id + "_orig_{:02d}.nii.gz", logger=logger
+        name_template=subject_id + "_orig_{:02d}.nii.gz",
+        ignored_volumes=frames_to_ignore,
+        cached=cached,
+        logger=logger
     )
 
     section.add_line(f"Loaded PET data from '{img_file}'. "
                      f"It contained {original_shape[3]} volumes, "
-                     f"each shaped {combined_image.shape[0:3]}."
+                     f"each shaped {combined_image.shape[0:3]}. "
                      + extra_sentence)
 
     return combined_image, volumes
@@ -378,11 +388,12 @@ def gather_data(results):
     combined_image, volumes = None, None
 
     # The first preference is if there is already a cached 4D image.
-    cached_img_file = args.output_path / "orig.nii.gz"
+    cached_img_file = args.output_path / f"{args.subject}_orig.nii.gz"
     if combined_image is None and cached_img_file.exists():
+        # If the image was cached, it was cached without the ignored frames
         combined_image, volumes = get_4D_data(
             cached_img_file, args.output_path, args.subject,
-            args.ignore_frames, rpt_sect, logger=logger
+            args.ignore_frames, rpt_sect, cached=True, logger=logger
         )
 
     # The next preference is a 4D image from the PICNIC pipeline.
@@ -415,7 +426,8 @@ def gather_data(results):
         )
         # Collect all the 3d image data into a single 4d structure.
         combined_image = combine_volumes_into_4d(
-            volumes, args.output_path / "orig.nii.gz", logger=logger
+            volumes, args.output_path / f"{args.subject}_orig.nii.gz",
+            logger=logger
         )
         rpt_sect.add_line(f"Loaded PET data from {len(moco_images)} moco files."
                           f" They contained {combined_image.shape[3]} volumes, "
@@ -438,9 +450,10 @@ def gather_data(results):
     # if axial_slices_to_clip == zero, this will not affect the image.
     # The header is updated along with the data.
     cropped_image = combined_image.slicer[:, :, args.axial_slices_to_clip:, :]
-    nib.save(cropped_image, args.output_path / "orig_cropped.nii.gz")
-    logger.debug(f"WROTE orig_cropped.nii.gz ({cropped_image.shape}) "
-                 f"to {str(args.output_path)}")
+    nib.save(cropped_image,
+             args.output_path / f"{args.subject}_orig_cropped.nii.gz")
+    logger.debug(f"WROTE {args.subject}_orig_cropped.nii.gz "
+                 f"({cropped_image.shape}) to {str(args.output_path)}")
     rpt_sect.add_line(f"Cropped {args.axial_slices_to_clip} slices from "
                       "the inferior of each PET volume taking them to "
                       f"{cropped_image.shape}.")
