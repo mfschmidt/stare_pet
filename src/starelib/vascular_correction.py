@@ -26,13 +26,18 @@ def tac_vascular_correction(results):
 
     # Write out the corrected tacs as a csv file
     corrected_tacs.to_csv(
-        results.args.debug_path / "step_3_corrected_tacs.tsv",
-        index=None, sep='\t'
+        results.args.debug_path / "step-3_corrected_tacs.tsv",
+        sep='\t', index=False,
     )
     fig = plot_before_and_after_tacs(
         results.tacs, corrected_tacs, results.mid_times,
     )
-    fig.savefig(results.args.fig_path / "step_3_vascular_corrected_tacs.png")
+    fig.savefig(results.args.fig_path / "step-3_vascular_corrected_tacs.png")
+    caption = "TACs before and after vascular correction"
+    rpt_sect.add_figure(
+        results.args.fig_path / "step-3_vascular_corrected_tacs.png",
+        caption
+    )
 
     results.corrected_tacs = corrected_tacs
 
