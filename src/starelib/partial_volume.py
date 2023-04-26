@@ -23,20 +23,20 @@ def correct_partial_volumes(results):
     logger.info(f"Started PVC at {pre_pvc_timestamp}")
 
     # Create a path for our partial-volume data
-    fig_path = results.args.output_path / "anchoring" / "pvc"
+    fig_path = results.args.output_path / "pvc"
     fig_path.mkdir(parents=True, exist_ok=True)
 
     # Perform PVC on each of the original volumes provided
     pvc_images = []
     pvc_exe = "/usr/local/bin/petpvc"
     for img in results.volume_images:
-        pvc_path = results.args.output_path / "anchoring" / "pvc" /\
-                   f"{results.args.subject}_pvc_{img.frame:02d}.nii.gz"
+        pvc_filename = f"{results.args.subject}_pvc_{img.frame:02d}.nii.gz"
+        pvc_path = results.args.output_path / "pvc" / pvc_filename
         full_command = [
             pvc_exe,
             "-i", str(img.path / img.filename),  # orig/orig_01.nii.gz
             "-o", str(pvc_path),  # anchoring/pvc/pvc_01.nii.gz
-            "-m", str(results.best_vascular_mask_path),
+            "-m", str(results.best_vascular_mask_path[2]),
             "-p", "STC",
             "-x", f"{results.args.fwhm:0.1f}",
             "-y", f"{results.args.fwhm:0.1f}",
@@ -65,7 +65,9 @@ def correct_partial_volumes(results):
 
     # Collect all the 3d image data into a single 4d structure.
     combined_image = combine_volumes_into_4d(
-        pvc_images, results.args.output_path / "pvc.nii.gz", logger=logger
+        pvc_images,
+        results.args.output_path / f"{results.args.subject}_pvc.nii.gz",
+        logger=logger
     )
 
     # PET data should be in units of 'mCi'
@@ -78,7 +80,7 @@ def correct_partial_volumes(results):
 
     reshaped_pvc_data = flatten_4d_to_2d(pet_4d_data)
 
-    vascular_mask_img = nib.load(results.best_vascular_mask_path)
+    vascular_mask_img = nib.load(results.best_vascular_mask_path[2])
     vascular_mask_data = vascular_mask_img.get_fdata().astype(np.double)
     reshaped_vascular_mask_data = flatten_4d_to_2d(
         np.reshape(
@@ -106,9 +108,9 @@ def correct_partial_volumes(results):
         open(results.args.debug_path / "tac_pvc.pkl", "wb")
     )
     tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
-        results.args.output_path / "step_2_pvc_mean_tac.csv"
+        results.args.output_path / "step-2_pvc_mean_tac.csv"
     )
-    logger.info("WROTE step_2_pvc_mean_tac.csv to "
+    logger.info("WROTE step-2_pvc_mean_tac.csv to "
                 f"{str(results.args.output_path)}")
 
     # Paint a picture of progress so far
@@ -131,7 +133,10 @@ def correct_partial_volumes(results):
         title=f"Subject {results.args.subject} Vascular TACs",
         palette=tac_plot_palette,
     )
-    fig_top_tacs.savefig(results.args.fig_path / "step_2_four_tacs.png")
+    fig_top_tacs.savefig(results.args.fig_path / "step-2_four_tacs.png")
+
+    caption = "All TACs through PVC"
+    rpt_sect.add_figure(results.args.fig_path / "step-2_four_tacs.png", caption)
 
     rpt_sect.end()
     return results
