@@ -29,7 +29,7 @@ class StareResults(Results):
         # Data from two-step clustering
         self.cluster_centroids = {1: [], 2: [], }  # contains best TAC so far
         self.cluster_model_fits = {1: [], 2: [], }
-        self.best_vascular_mask_path = None
+        self.best_vascular_mask_path = {}
 
         # Data from partial volume correction
         self.pvc_mean_vascular_tac = None  # pvc-corrected best cluster TAC
@@ -43,6 +43,8 @@ class StareResults(Results):
         self.corrected_tacs = None
 
         # Data from bootstrapping randomized TACs
+        self.kde_lower_bounds = None
+        self.kde_upper_bounds = None
         self.bootstrap_curves = []
         self.bootstrap_rate_constants = []
         self.bootstrap_ki_fwhm = None
