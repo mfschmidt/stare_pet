@@ -6,7 +6,7 @@
 #
 cycler==0.11.0
     # via matplotlib
-fonttools==4.38.0
+fonttools==4.39.3
     # via matplotlib
 humanize==4.6.0
     # via stare-pet (pyproject.toml)
@@ -14,13 +14,13 @@ joblib==1.2.0
     # via scikit-learn
 kiwisolver==1.4.4
     # via matplotlib
-matplotlib==3.7.0
+matplotlib==3.7.1
     # via
     #   seaborn
     #   stare-pet (pyproject.toml)
-nibabel==5.0.1
+nibabel==5.1.0
     # via stare-pet (pyproject.toml)
-numpy==1.24.2
+numpy==1.24.3
     # via
     #   matplotlib
     #   nibabel
@@ -29,15 +29,15 @@ numpy==1.24.2
     #   scipy
     #   seaborn
     #   stare-pet (pyproject.toml)
-packaging==23.0
+packaging==23.1
     # via
     #   matplotlib
     #   nibabel
-pandas~=1.5.0.dev0+939.g5465f54f76
+pandas==2.0.1
     # via
     #   seaborn
     #   stare-pet (pyproject.toml)
-Pillow==9.4.0
+Pillow==9.5.0
     # via matplotlib
 pyparsing==3.0.9
     # via
@@ -47,9 +47,9 @@ python-dateutil==2.8.2
     # via
     #   matplotlib
     #   pandas
-pytz==2022.7.1
+pytz==2023.3
     # via pandas
-scikit-learn==1.2.1
+scikit-learn==1.2.2
     # via stare-pet (pyproject.toml)
 scipy==1.10.1
     # via
@@ -66,4 +66,4 @@ threadpoolctl==3.1.0
 # setuptools
 
 nilearn~=0.10.0
-setuptools~=67.4.0
+setuptools==67.7.2
