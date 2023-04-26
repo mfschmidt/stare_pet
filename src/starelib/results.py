@@ -21,7 +21,10 @@ class Results:
         self._logger = logging.getLogger(self._name)
         self.setup_logger()
 
-        self.report = Report(self._name)
+        self.report = Report(
+            self._name,
+            parsed_args.output_path / f"{parsed_args.subject}_stare_report.html"
+        )
 
     @property
     def name(self):
@@ -105,6 +108,7 @@ class Results:
 
     def end(self):
         self._end_datetime = datetime.now()
+        self.report.end()
         self._logger.info(f"{str(self.elapsed())} elapsed.")
         self._logger.info(f"End {self._name} at {self.end_time_str}.")
 
