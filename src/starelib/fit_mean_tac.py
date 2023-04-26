@@ -185,24 +185,31 @@ def fit_vascular_mean_tac(results):
     # Step 3. Correct TACs by extracting the mean signal from each cluster.
     # Needs to know about ignored mid-times to weight durations appropriately
 
-    cache_file = "step_3_decay_model_fits.pkl"
-    successes = from_cache(
+    cache_file = "step-3_decay_model_fits.pkl"
+    successes_and_curve_counts = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if successes is None:
+    if successes_and_curve_counts is None:
         # Fit repeatedly until we have ten successes or complete failure.
         # Only fitting decay of activity past the peak - not pre-peak rise
-        successes = find_curve_fits(
+        successes, curve_counts = find_curve_fits(
             decay_model,
             results.pvc_mean_vascular_tac.post_peak_timepoints(),
             results.pvc_mean_vascular_tac.post_peak_activity(),
-            sigmas=results.pvc_mean_vascular_tac.post_peak_sigmas(method='sqrt'),
+            sigmas=results.pvc_mean_vascular_tac.post_peak_sigmas(
+                method='sqrt'
+            ),
             success_limit=10, failure_limit=8192
         )
-        to_cache(successes, results.args.cache_path, cache_file)
+        to_cache((successes, curve_counts), results.args.cache_path, cache_file)
     else:
+        successes = successes_and_curve_counts[0]
+        curve_counts = successes_and_curve_counts[1]
         logger.info("  loaded cached step 3 decay model fits to save time")
 
+    rpt_sect.add_line(f"{len(successes)} curves were successfully fit, "
+                      f"amid {curve_counts[1]} failures, "
+                      f"to the three-level exponential decay model.")
     if results.args.debug_path is not None:
         pickle.dump(
             successes,
@@ -216,7 +223,10 @@ def fit_vascular_mean_tac(results):
     lores_tac.sd = results.pvc_mean_vascular_tac.sd
 
     fig = plot_detailed_tacs([lores_tac, hires_tac])
-    fig.savefig(results.args.fig_path / "fits_hi_vs_lo_res.png")
+    fig_name = "step-3_fits_hi_v_lo.png"
+    fig.savefig(results.args.fig_path / fig_name)
+    caption = f"Decay model fit in high and low resolution"
+    rpt_sect.add_figure(results.args.fig_path / fig_name, caption)
     if results.args.verbose > 0 and results.args.debug_path is not None:
         pickle.dump(
             lores_tac,
