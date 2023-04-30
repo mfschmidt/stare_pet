@@ -2,13 +2,13 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import dual_annealing
 from datetime import datetime
-import multiprocessing as mp
 import pickle
 
 from .fitting_models import solve_stttm
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_all_stare_tac_fits
 from .util import from_cache, to_cache
+from .mp_queues import run_in_mp_queue
 
 
 def cost_function(
@@ -178,7 +178,6 @@ def minimize_cost_function(results, max_iter=6000, x0=None):
     sa_bounds = [(results.kde_lower_bounds[i], results.kde_upper_bounds[i])
                  for i in range(len(results.kde_lower_bounds))]
 
-    annealer_results = {}
     mp_args_list = []
     for i, region in enumerate(results.corrected_tacs.columns):
         print(f"  set up simulated annealing '{region}' at {datetime.now()}")
@@ -207,44 +206,9 @@ def minimize_cost_function(results, max_iter=6000, x0=None):
         # fig, axes = plot_stare_tac_fits(optimization_result)
         # fig.savefig(out_path / f"fit_tac_{region.name}_via_sa.png")
 
-    # Create the process pool and launch processes to deal with it.
-    print(f"Creating MP Queue at {datetime.now().strftime('%Y-%m-%d %I:%M')}")
-    processes = []
-
-    # Fill the queue with jobs
-    task_queue = mp.Queue()
-    rslt_queue = mp.Queue()
-    for argument_tuple in mp_args_list:
-        task_queue.put(argument_tuple)
-    print(f"  queue has {task_queue.qsize()} jobs")
-    for _ in range(results.args.num_cpus):
-        task_queue.put(None)  # to kill each worker when real jobs are complete
-    print(f"  queue has {task_queue.qsize()} (jobs + Nones)")
-
-    # Create processes to handle the jobs
-    for pid in range(results.args.num_cpus):
-        proc = mp.Process(
-            target=queue_consumer, args=(task_queue, rslt_queue, pid)
-        )
-        # proc.daemon = True  # process run in background and clean up its mess
-        print(f"  start process {pid}")
-        proc.start()
-        processes.append(proc)
-    # All processes are now running separately.
-    # This process will continue without waiting until rslt_queue.get() below.
-
-    print(f"  queue has {rslt_queue.qsize()} results")
-
-    # Results are stuck back onto the queue, so we need to get them.
-    # This rslt_queue.get() should wait for a result,
-    # pausing this thread until processes finish.
-    for _ in mp_args_list:
-        annealer_result = rslt_queue.get()
-        print(f"  GOT a result")
-        annealer_results[annealer_result["i"]] = annealer_result
-
-    print(f"Completed MP Queue at {datetime.now().strftime('%Y-%m-%d %I:%M')}")
-    print(f"  queue has {rslt_queue.qsize()} results")
+    annealer_results = run_in_mp_queue(
+        queue_consumer, mp_args_list, results.args.num_cpus, results.logger
+    )
 
     # TODO: Package up lines 250-282 into a "package_rate_constants" function
     # Save the rate constants in an accessible csv format.
