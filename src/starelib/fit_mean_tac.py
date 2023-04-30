@@ -186,13 +186,13 @@ def fit_vascular_mean_tac(results):
     # Needs to know about ignored mid-times to weight durations appropriately
 
     cache_file = "step-3_decay_model_fits.pkl"
-    successes_and_curve_counts = from_cache(
+    successes_and_failures = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if successes_and_curve_counts is None:
+    if successes_and_failures is None:
         # Fit repeatedly until we have ten successes or complete failure.
         # Only fitting decay of activity past the peak - not pre-peak rise
-        successes, curve_counts = find_curve_fits(
+        successes, failures = find_curve_fits(
             decay_model,
             results.pvc_mean_vascular_tac.post_peak_timepoints(),
             results.pvc_mean_vascular_tac.post_peak_activity(),
@@ -201,14 +201,14 @@ def fit_vascular_mean_tac(results):
             ),
             success_limit=10, failure_limit=8192
         )
-        to_cache((successes, curve_counts), results.args.cache_path, cache_file)
+        to_cache((successes, failures), results.args.cache_path, cache_file)
     else:
-        successes = successes_and_curve_counts[0]
-        curve_counts = successes_and_curve_counts[1]
+        successes = successes_and_failures[0]
+        failures = successes_and_failures[1]
         logger.info("  loaded cached step 3 decay model fits to save time")
 
     rpt_sect.add_line(f"{len(successes)} curves were successfully fit, "
-                      f"amid {curve_counts[1]} failures, "
+                      f"amid {len(failures)} failures, "
                       f"to the three-level exponential decay model.")
     if results.args.debug_path is not None:
         pickle.dump(
