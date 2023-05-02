@@ -292,7 +292,10 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
 def plot_tac_fits(
         fit_data, param_data, title="", figsize=(8, 5), save_to=None
 ):
-    """ Plot the fits contained in the dict. """
+    """ Plot the fits contained in the fit_data dict.
+
+        This function is only used in a debug script, not STARE.
+    """
 
     # Plot results for analysis
     fig, axes = plt.subplots(figsize=figsize)
@@ -737,7 +740,10 @@ def plot_stare_tac_fits(
         tac_data, mid_times, source_region, target_fits, cost,
         figsize=(7.5, 7.5),
 ):
-    """ Plot TACs from simulated annealing fitting """
+    """ Plot TACs from simulated annealing fitting,
+
+        This function is not used anywhere.
+    """
 
     fig, axes = plt.subplots(nrows=2, figsize=figsize)
 
@@ -792,7 +798,11 @@ def plot_all_stare_tac_fits(
         tac_data, mid_times, optimizations, comparisons=None,
         figsize=(10.0, 7.5),
 ):
-    """ Plot TACs from simulated annealing fitting """
+    """ Plot TACs from simulated annealing fitting,
+
+        This plotter is called after simulated_annealing,
+        and in a simulated annealing debugger script.
+    """
 
     fig, axes = plt.subplots(nrows=2, ncols=3, figsize=figsize)
 
