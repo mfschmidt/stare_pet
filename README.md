@@ -17,11 +17,11 @@ are available via [github pages](https://mfschmidt.github.io/stare_pet/).
 
 ## Installation
 
-stare_pet is made available via pypi.
+stare_pet is not yet available via pypi.
 
     pip install stare_pet
 
-or this github repository
+But it is in this github repository
 
     git clone https://github.com/mfschmidt/stare_pet
     pip install ./stare_pet
@@ -30,7 +30,7 @@ or
 
     pip install git+https://github.com/mfschmidt/stare_pet.git#egg=stare_pet
 
-But it is dependent upon PETPVC, which you will need to have installed
+It is dependent upon PETPVC, which you will need to have installed
 on the machine running stare_pet.
 An **alternative** is to run in docker,
 which already has the dependencies installed.
