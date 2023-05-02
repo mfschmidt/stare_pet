@@ -49,7 +49,7 @@ def get_argument_parser():
         help="The irreversible PET tracer used, only 'FDG' is supported",
     )
     parser.add_argument(
-        "-c", "--vasc-corr-pct", type=int, default=5,
+        "-c", "--vasc-corr-pct", type=int, default=0,
         help="The vascular correction percentage, as an integer from 0 to 100",
     )
     parser.add_argument(
