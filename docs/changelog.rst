@@ -4,6 +4,12 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.5.0, 2023-05-01
+
+- Implemented multiprocessing for bootstrapping parameters
+- Implemented full (but not pretty) html report
+- Implemented proper caching and retrieval of skipped volumes
+
 Version 0.4.0, 2023-03-19
 
 - Implemented multiprocessing for simulated annealing
