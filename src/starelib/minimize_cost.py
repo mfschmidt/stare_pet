@@ -119,22 +119,6 @@ def worker(arg_tuple):
     }
 
 
-def queue_consumer(task_q, rslt_q, pid):
-    print(f"  process {pid} is alive and checking the queue.")
-    while True:
-        # Get the next set of parameters to minimize
-        msg = task_q.get()
-        if msg is None:
-            break
-        else:
-            # Save results to the result queue,
-            print(f"  process {pid} sending worker tuple "
-                  f"for region {msg[0]}...", flush=True)
-            rslt_q.put(worker(msg))
-
-    print(f"  process {pid} consumed a None and is exiting.")
-
-
 def minimize_cost_function(results, max_iter=6000, x0=None):
     """ Find parameters for each region in corrected_tacs
 
@@ -207,7 +191,7 @@ def minimize_cost_function(results, max_iter=6000, x0=None):
         # fig.savefig(out_path / f"fit_tac_{region.name}_via_sa.png")
 
     annealer_results = run_in_mp_queue(
-        queue_consumer, mp_args_list, results.args.num_cpus, results.logger
+        worker, mp_args_list, results.args.num_cpus, results.logger
     )
 
     # TODO: Package up lines 250-282 into a "package_rate_constants" function

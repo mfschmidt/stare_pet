@@ -151,8 +151,9 @@ def get_initial_parameters(n=6, init_params=None):
     return parameters
 
 
-def find_curve_fits(f, x, y, sigmas=None,
-                    success_limit=10, failure_limit=8192):
+def find_curve_fits(
+        f, x, y, sigmas=None, success_limit=10, failure_limit=8192
+):
     """ Find several options for fitting data to our model.
 
         :param function f: the curve to fit, returns a y for any x
@@ -168,11 +169,10 @@ def find_curve_fits(f, x, y, sigmas=None,
 
     # Fit repeatedly until we have ten successes or complete failure.
     successes = []
-    num_successes, num_failures, num_attempts = 0, 0, 0
-    while len(successes) < success_limit and num_failures < failure_limit:
-        np.random.seed = 42 * (num_failures + 7)
+    failures = []
+    while len(successes) < success_limit and len(failures) < failure_limit:
+        np.random.seed = 42 * (len(failures) + 7)
         p0 = get_initial_parameters(6)
-        num_attempts += 1
         try:
             # Fit the data to the model, returning parameters and covariance.
             retval = curve_fit(
@@ -198,23 +198,26 @@ def find_curve_fits(f, x, y, sigmas=None,
             # than zero, and less than 1. Anything over 10 is truly missing
             # the curve and can be dismissed as failure.
             if np.isnan(retval[0]).any() or np.isnan(retval[1]).any():
-                num_failures += 1
-                logger.info("a curve fit converged, but converged to NaN, "
-                            f"failure {num_failures} for this model, "
-                            f"{len(successes)} successes.")
+                failures.append((2, "fit converged, but converged to NaN"))
+                logger.debug("a curve fit converged, but converged to NaN, "
+                             f"failure {len(failures)} for this model, "
+                             f"{len(successes)} successes.")
             elif np.isinf(retval[0]).any() or np.isinf(retval[1]).any():
-                num_failures += 1
+                failures.append((3, "fit converged, but converged to Infinity"))
                 logger.info("a curve fit converged, but converged to infinity, "
-                            f"failure {num_failures} for this model, "
+                            f"failure {len(failures)} for this model, "
                             f"{len(successes)} successes.")
             elif weighted_error > 10.0:
-                num_failures += 1
+                failures.append(
+                    (4,
+                     "fit converged, but weighted error of "
+                     f"{weighted_error:0.2f} (rms {rms:0.2f}) is high.")
+                )
                 logger.info("a curve fit converged, but weighted error of "
                             f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
-                            f"failure {num_failures} for this model, "
+                            f"failure {len(failures)} for this model, "
                             f"{len(successes)} successes.")
             else:
-                num_successes += 1
                 successes.append({
                     "parameters": fit_parameters,
                     "covariance": retval[1],
@@ -224,20 +227,19 @@ def find_curve_fits(f, x, y, sigmas=None,
                     "wrms": weighted_error,
                 })
         except RuntimeError:
-            num_failures += 1
+            failures.append((1, "fit failed to converge"))
             logger.info("a curve fit failed to converge, "
-                        f"failure {num_failures} for this model, "
+                        f"failure {len(failures)} for this model, "
                         f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
 
-    logger.info(f"Of {num_attempts} attempts, "
-                f"{num_successes} converged and "
-                f"{num_failures} failed to converge.")
+    logger.info(f"{len(successes)} converged and "
+                f"{len(failures)} failed to converge.")
 
     # In the case of success, this is a list of dicts.
     # In the case of failure, it is an empty list.
-    return successes, (num_successes, num_failures, num_attempts)
+    return successes, failures
 
 
 def source_to_target_tissue_model(

@@ -3,46 +3,41 @@ import pickle
 from scipy.interpolate import pchip_interpolate
 from scipy.optimize import least_squares
 from scipy.stats import gaussian_kde
+from datetime import datetime
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
 from .util import from_cache, to_cache
 from .fitting_models import decay_model, find_curve_fits, func2tc_model
 from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
+from .mp_queues import run_in_mp_queue
 
 
-def gen_bootstrap_curves(
-        sample_mean, sample_sd, n=1000,
-        distribution='uniform', seed=999
-):
-    """ Generate n curves within 1SD of sample for bootstrapping """
+class CurveGenerator():
+    """ An object that generates random curves
 
-    # Ensure the data we're given make sense
-    assert(len(sample_mean) == len(sample_sd))
+        Instantiate the object, then call object.new() any time you want
+        a new curve based on the mean, sd, and distribution you used to
+        initialize it.
+    """
 
-    # Seed the random number generator
-    rng = np.random.default_rng(seed)
-    if distribution == 'uniform':
-        randomizer = rng.random
-    elif distribution == 'normal':
-        randomizer = rng.normal
-    else:
-        # Default to uniform
-        randomizer = rng.random
+    def __init__(self, mean, sd, distribution='uniform', seed=999):
+        assert (len(mean) == len(sd))
+        self._mean = mean
+        self._sd = sd
+        self._distribution = distribution
+        if self._distribution == 'normal':
+            self.randomizer = np.random.default_rng(seed).normal
+        else:
+            # Default to uniform
+            self.randomizer = np.random.default_rng(seed).random
 
-    # Generate a thousand curves, based on actual TAC plus random noise
-    boot_curves = []
-    for i in range(n):
-        # IDEA: This is a uniform distribution, but perhaps a normal
-        #       distribution would be better weighted?
+    def new(self):
         # IDEA: More realistic, also, would be to restrict how far
         #       a given point @t can be from the previous point @t-1.
-        random_noise = 2.0 * (randomizer(len(sample_mean)) - 0.5)
-        scaled_deviation = random_noise * sample_sd
-        generated_curve = sample_mean + scaled_deviation
-        boot_curves.append(generated_curve)
-
-    return np.array(boot_curves)
+        random_noise = 2.0 * (self.randomizer(len(self._mean)) - 0.5)
+        scaled_deviation = random_noise * self._sd
+        return self._mean + scaled_deviation
 
 
 def make_uniform_time_curve(pvc_mean_tac, spacing=0.10):
@@ -113,54 +108,75 @@ def make_uniform_time_curve(pvc_mean_tac, spacing=0.10):
     )
 
 
-def fit_curves(curves, vascular_tac, uniform_tac, verbose=True):
-    """ Fit each curve to triple-stack exponential. """
+def fit_curve_to_exponential(bootstrap_curve, vascular_tac, uniform_tac):
+    """ Fit just one curve, generator-style """
 
-    good_curves = []
-    counts = {
-        "fit": 0,
-        "skipped_for_negatives": 0,
-    }
-    for i, curve in enumerate(curves):
-
-        # TODO: Put each curve in a queue, let multiple Processes handle them.
-
-        # Let the function handle successes and failures and fitting.
-        # It will return a list of 'success_limit' fits, so we [0] the only one.
-        fits, curve_counts = find_curve_fits(
-            decay_model, vascular_tac.post_peak_timepoints(), curve,
-            sigmas=vascular_tac.post_peak_sigmas(),
-            success_limit=1, failure_limit=256
+    successes, failures = find_curve_fits(
+        decay_model,
+        vascular_tac.post_peak_timepoints(),
+        bootstrap_curve,
+        sigmas=vascular_tac.post_peak_sigmas(),
+        success_limit=1
+    )
+    if len(successes) == 0:
+        return None, failures
+    else:
+        fit = successes[0]
+        post_peak_boot_curve_fit_uniform = decay_model(
+            uniform_tac.post_peak_timepoints(),
+            *fit['parameters']
         )
-        if len(fits) > 0:
-            counts["fit"] += 1
-            first_fit = fits[0]
+        full_boot_curve_fit_uniform = np.concatenate([
+            uniform_tac.pre_peak_activity(),
+            post_peak_boot_curve_fit_uniform
+        ])
+        if np.any(full_boot_curve_fit_uniform < 0.0):
+            failures.append((0, "good fit, but had negatives"))
+            return None, failures
+        else:
+            fit['curve'] = full_boot_curve_fit_uniform
 
-            # Combine interpolated pre-peak blood data with post-peak fit
-            post_peak_boot_curve_fit_uniform = decay_model(
-                uniform_tac.post_peak_timepoints(),
-                *first_fit['parameters']
-            )
-            full_boot_curve_fit_uniform = np.concatenate([
-                uniform_tac.pre_peak_activity(),
-                post_peak_boot_curve_fit_uniform
-            ])
-
-            # Store fits that seem OK
-            if np.any(full_boot_curve_fit_uniform < 0.0):
-                counts["skipped_for_negatives"] += 1
-                if verbose:
-                    print(f"SKIPPING: Solution {i} contains negatives.")
-            else:
-                # save y; x is the same boot_curve_time_uniform for every curve.
-                good_curves.append(full_boot_curve_fit_uniform)
-
-    return good_curves
+        return fit, failures
 
 
-def fit_curves_to_regional_tacs(
-        good_curves, vascular_tac, uniform_tac, corrected_regional_tacs,
-        num_2tc_params, vasc_corr_pct, verbose=True,
+def fit_curves_mp(
+        results, num_curves=100, num_2tc_params=3,
+):
+    """ Generate and fully fit n curves. """
+
+    # Stretch fit_tac's timepoints out to be evenly spaced at 0.10 seconds.
+    # This is just a template to fit upcoming curves onto.
+    uniform_tac = make_uniform_time_curve(
+        results.pvc_mean_vascular_tac, spacing=0.10
+    )
+
+    # Support random curve generation, on the fly, as many times as necessary,
+    # based on actual TAC plus random noise
+    curve_generator = CurveGenerator(
+        results.pvc_mean_vascular_tac.post_peak_activity(),
+        results.pvc_mean_vascular_tac.post_peak_sd(),
+        distribution='uniform', seed=999
+    )
+
+    list_of_args = [(
+        i, curve_generator, results.pvc_mean_vascular_tac, uniform_tac,
+        results.corrected_tacs, num_2tc_params, results.args.vasc_corr_pct
+    ) for i in range(num_curves)]
+
+    curve_fit_results = run_in_mp_queue(
+        worker, list_of_args, results.args.num_cpus, results.logger
+    )
+
+    # Count up failures from fitting all the curves and report them.
+    num_failures = np.sum([len(r['errors']) for r in curve_fit_results])
+    results.logger.info(f"Fitting {len(curve_fit_results)} curves required "
+                        f"{num_failures} failures.")
+    return curve_fit_results
+
+
+def fit_curve_to_regional_tacs(
+        good_curve, vascular_tac, uniform_tac, corrected_regional_tacs,
+        num_2tc_params, vasc_corr_pct,
 ):
     """ """
 
@@ -171,85 +187,68 @@ def fit_curves_to_regional_tacs(
     upper_bounds = np.ones((1, num_2tc_params))
 
     regions = corrected_regional_tacs.columns
-    bootstrap_rate_constants = np.zeros(
-        (len(good_curves), len(regions), num_2tc_params)
-    )
+    bootstrap_rate_constants = np.zeros((len(regions), num_2tc_params))
 
     # Assess each fit curve as an adjuster to regional tacs
-    num_good_rate_constants = 0
-    for i, curve in enumerate(good_curves):
+    # Reset rate constants and bounds for each curve
+    rate_constants = np.zeros((len(regions), num_2tc_params))
 
-        # TODO: Put each curve in a queue, let multiple Processes handle them.
+    # Get boot curve down-sampled to original mid_times
+    curve_for_original_t = pchip_interpolate(
+        xi=uniform_tac.timepoints,
+        yi=good_curve,
+        x=vascular_tac.timepoints,
+    )
 
-        # Reset rate constants and bounds for each curve
-        rate_constants = np.zeros((len(regions), num_2tc_params))
+    fit_errors = []
+    for j, region in enumerate(regions):
+        # Adjust regional TAC by bootstrapped vascular activity
+        raw_activity = corrected_regional_tacs[region].values
+        vc_pct = vasc_corr_pct / 100.0
+        adjustment = curve_for_original_t * vc_pct
+        vasc_corr_tac = (raw_activity - adjustment) / (1.0 - vc_pct)
 
-        # Get boot curve down-sampled to original mid_times
-        curve_for_original_t = pchip_interpolate(
-            xi=uniform_tac.timepoints,
-            yi=curve,
-            x=vascular_tac.timepoints,
-        )
+        # Score adjusted TAC for 2TCM fit
+        successes, failures = 0, 0
+        while successes < 1 and failures < 10:
+            # Generate random rate constants between lower_ & upper_bounds
+            two_sd = upper_bounds - lower_bounds
+            x0 = lower_bounds + (two_sd * [rng.random() for _ in range(num_2tc_params)])
+            # Use weights, not sigmas, for func2tc_model. It weights
+            # residuals within the function, not depending on the
+            # curve fitting library to do so.
+            ls_result = least_squares(
+                func2tc_model,
+                x0.ravel(),
+                bounds=(lower_bounds.ravel(), upper_bounds.ravel()),
+                kwargs={
+                    "uniform_mid_times": uniform_tac.timepoints,
+                    "mid_times": vascular_tac.timepoints,
+                    "full_boot_curve_fit_uniform": good_curve,
+                    "tac": vasc_corr_tac,
+                    "weights": vascular_tac.weights(),
+                    "tracer": 'FDG'
+                }
+            )
+            if ls_result.success:
+                # This should only happen once per j, and not overwrite rcs
+                successes += 1
+                rate_constants[j, :] = np.real(ls_result.x)
+            else:
+                # This can happen repeatedly, no harm in overwriting nans
+                fit_errors.append((11, "least squares failure to fit"))
+                failures += 1
 
-        for j, region in enumerate(regions):
-            # Adjust regional TAC by bootstrapped vascular activity
-            raw_activity = corrected_regional_tacs[region].values
-            vc_pct = vasc_corr_pct / 100.0
-            adjustment = curve_for_original_t * vc_pct
-            vasc_corr_tac = (raw_activity - adjustment) / (1.0 - vc_pct)
+    # If any of the fits, for any of the regions is near 0 or 1,
+    # invalidate the whole thing. 2TCM should not be 0 or 1
+    if np.any(np.abs(rate_constants.ravel() < 0.0001)):
+        rate_constants[:, :] = np.nan
+        fit_errors.append((12, "least squares produced a zero rate constant"))
+    elif np.any(np.abs(1.0 - rate_constants.ravel()) < 0.0001):
+        rate_constants[:, :] = np.nan
+        fit_errors.append((13, "least squares produced a one rate constant"))
 
-            # Score adjusted TAC for 2TCM fit
-            successes, failures = 0, 0
-            while successes < 1 and failures < 10:
-                # Generate random rate constants between lower_ & upper_bounds
-                two_sd = upper_bounds - lower_bounds
-                x0 = lower_bounds + two_sd * rng.random()
-                # Use weights, not sigmas, for func2tc_model. It weights
-                # residuals within the function, not depending on the
-                # curve fitting library to do so.
-                ls_result = least_squares(
-                    func2tc_model,
-                    x0.ravel(),
-                    bounds=(lower_bounds.ravel(), upper_bounds.ravel()),
-                    kwargs={
-                        "uniform_mid_times": uniform_tac.timepoints,
-                        "mid_times": vascular_tac.timepoints,
-                        "full_boot_curve_fit_uniform": curve,
-                        "tac": vasc_corr_tac,
-                        "weights": vascular_tac.weights(),
-                        "tracer": 'FDG'
-                    }
-                )
-                if ls_result.success:
-                    # This should only happen once per j, and not overwrite rcs
-                    successes += 1
-                    rate_constants[j, :] = np.real(ls_result.x)
-                else:
-                    # This can happen repeatedly, no harm in overwriting nans
-                    failures += 1
-
-        # If any of the fits, for any of the regions is near 0 or 1,
-        # invalidate the whole thing. 2TCM should not be 0 or 1
-        if np.any(np.abs(rate_constants.ravel() < 0.0001)):
-            rate_constants[:, :] = np.nan
-            status = "cancelled due to a zero rate constant"
-        elif np.any(np.abs(1.0 - rate_constants.ravel()) < 0.0001):
-            rate_constants[:, :] = np.nan
-            status = "cancelled due to a one rate constant"
-        else:
-            status = "good"
-            num_good_rate_constants += 1
-
-        if verbose:
-            print(f"{i}/{len(good_curves)}. {status}")
-
-        # Update the full collection of rate_constants
-        bootstrap_rate_constants[i] = rate_constants
-
-    print(f"Found {num_good_rate_constants} rate constants "
-          f"from {len(good_curves)} curves.")
-
-    return bootstrap_rate_constants
+    return rate_constants, fit_errors
 
 
 def find_2tc_bounds(rate_constants):
@@ -303,6 +302,72 @@ def find_2tc_bounds(rate_constants):
     return lower_bounds, upper_bounds, peaks, fwhm
 
 
+def worker(arg_tuple):
+    """ Bootstrap a random starting point, fit to exponential, fit to data
+
+        This worker can be launched in a separate process to do all three
+        of the necessary steps for bootstrap anchoring. It will first
+        generate a random curve as a starting vector. It will then fit
+        that curve to a stack of three exponentials. It will then fit
+        that result to real data. Errors at any step will be logged and
+        the process will start over with new seed parameters.
+    """
+
+    # Workers get a single argument, so the caller must pack things into a tuple
+    # and the worker must unpack them.
+    # This order must match exactly the order where they're packed in.
+    (i, curve_generator, vascular_tac, uniform_tac, corrected_regional_tacs,
+        num_2tc_params, vasc_corr_pct) = arg_tuple
+
+    worker_start = datetime.now()
+    print(f"    Starting worker for curve {i} "
+          f"at {worker_start.strftime('%m/%d %I:%M')}", flush=True)
+
+    cumulative_errors = []
+    final_curve = None
+    while final_curve is None:
+
+        # First, generate a random curve to serve as a starting point.
+        bootstrap_curve = curve_generator.new()
+
+        # Second, fit this curve to three stacked exponentials.
+        exp_fit, fit_exp_errors = fit_curve_to_exponential(
+            bootstrap_curve, vascular_tac, uniform_tac
+        )
+        cumulative_errors = cumulative_errors + fit_exp_errors
+        if exp_fit is None:
+            continue
+
+        # Third, fit the exponentials onto actual data.
+        rate_constants, fit_tac_errors = fit_curve_to_regional_tacs(
+            exp_fit['curve'], vascular_tac, uniform_tac,
+            corrected_regional_tacs, num_2tc_params, vasc_corr_pct
+        )
+        good_rate_constants = rate_constants[[
+            ~np.any(np.isnan(rate_constants[_].ravel()))
+            for _ in range(rate_constants.shape[0])
+        ]]
+        cumulative_errors = cumulative_errors + fit_tac_errors
+        if len(good_rate_constants) == 0:
+            continue
+        else:
+            final_curve = good_rate_constants  # triggers break from while loop
+
+    worker_end = datetime.now()
+    print(f"    Finished worker for region {i} "
+          f"at {worker_end.strftime('%m/%d %I:%M')} "
+          f"after {worker_end - worker_start}.", flush=True)
+
+    return {
+        "i": i,
+        "bootstrap_curve": bootstrap_curve,
+        "fit_exp": exp_fit,
+        "rate_constants": rate_constants,
+        "errors": cumulative_errors,
+        "elapsed_time": worker_end - worker_start,
+    }
+
+
 def boot_anchor(results):
     """
         :param results: An object containing lots of data from the pipeline
@@ -313,7 +378,11 @@ def boot_anchor(results):
     rpt_sect = results.report.begin_section("Bootstrap anchoring")
 
     # Manual configuration
-    bootstrap_iterations = 1000
+    # Originally, we aimed for 1000 boostrap seed curves,
+    # which resulted in about 500-600 "good" curves,
+    # which resulted in about 100-200 "fit" curves.
+    # We are now targeting 500 fit curves, however many seeds that takes.
+    bootstrap_iterations = 500
 
     # Currently, only FDG is supported. Other tracers would require
     # changes to this 2TCirr. We would then have to check the tracer.
@@ -323,19 +392,8 @@ def boot_anchor(results):
         # raise ValueError("Tracer must be FDG. No others are yet supported.")
         print("Tracer should be FDG. No others are officially supported.")
 
-    # Generate a thousand curves, based on actual TAC plus random noise
-    bootstrap_curves = gen_bootstrap_curves(
-        results.pvc_mean_vascular_tac.post_peak_activity(),
-        results.pvc_mean_vascular_tac.post_peak_sd(),
-        n=bootstrap_iterations, distribution='uniform', seed=999
-    )
-    if results.args.debug_path is not None and results.args.debug_path.exists():
-        pickle.dump(
-            bootstrap_curves,
-            open(results.args.debug_path / "boot_curve_permutations.pkl", "wb")
-        )
-
     # Stretch fit_tac's timepoints out to be evenly spaced at 0.10 seconds.
+    # This is just a template to fit upcoming curves onto.
     uniform_tac = make_uniform_time_curve(
         results.pvc_mean_vascular_tac, spacing=0.10
     )
@@ -343,52 +401,32 @@ def boot_anchor(results):
     # Attempt to fit each bootstrap curve to the stacked exponential decay model
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
-    cache_file = "step-4_good_curves.pkl"
-    good_curves = from_cache(
+    cache_file = "step-4_bootstrap_curve_fits.pkl"
+    good_curves_fits = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if good_curves is None:
+    if good_curves_fits is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
-        good_curves = fit_curves(
-            bootstrap_curves, results.pvc_mean_vascular_tac, uniform_tac,
-            verbose=results.args.verbose
+        good_curves_fits = fit_curves_mp(
+            results, bootstrap_iterations, num_2tc_params
         )
-        to_cache(good_curves, results.args.cache_path, cache_file)
+        to_cache(good_curves_fits, results.args.cache_path, cache_file)
     else:
-        logger.info("  loaded cached step 4a curve fits to save time")
+        logger.info("  loaded cached step 4 curve fits to save time")
     rpt_sect.add_line(f"From {bootstrap_iterations} random curves, "
-                      f"{len(good_curves)} good curves were found.")
+                      f"{len(good_curves_fits)} good curves were found.")
 
-    # Attempt to extract reasonable rate constants from each good curve
-    # If prior rate constants were cached to disk, load them rather than running
-    cache_file = "step-4_rate_constants.pkl"
-    good_rate_constants = from_cache(
-        results.args.cache_path, cache_file, results.args.force
-    )
-    if good_rate_constants is None:
-        rate_constants = fit_curves_to_regional_tacs(
-            good_curves, results.pvc_mean_vascular_tac, uniform_tac,
-            results.corrected_tacs, num_2tc_params, results.args.vasc_corr_pct,
-            verbose=results.args.verbose
-        )
-        good_rate_constants = rate_constants[[
-            ~np.any(np.isnan(rate_constants[_].ravel()))
-            for _ in range(rate_constants.shape[0])
-        ]]
-        to_cache(good_rate_constants, results.args.cache_path, cache_file)
-    else:
-        logger.info("  loading cached step 4b rate constants to save time")
-
-    rpt_sect.add_line(f"From {len(good_curves)} good curves, "
-                      f"{len(good_rate_constants)} good sets of "
-                      f"rate constants were found.")
-    if len(good_rate_constants) == 0:
+    if len(good_curves_fits) == 0:
         logger.error("FAILURE: No curves could be fit!!")
         rpt_sect.add_line("No curves were fit during bootstrapping!")
         rpt_sect.end()
         return results
 
+    good_rate_constants = np.asarray(
+        [c['rate_constants'] for c in good_curves_fits]
+    )
     # Get upper and lower bounds for 2TCM parameters
+    # This wants n x 6 region x 3 parameter
     kde_lower_bounds, kde_upper_bounds, kde_peaks, kde_fwhm = find_2tc_bounds(
         good_rate_constants,
     )
@@ -419,14 +457,16 @@ def boot_anchor(results):
             "kde_fwhm": kde_fwhm,
             "ki_fwhm": ki_fwhm,
             "uniform_tac": uniform_tac,
-            "uniform_curves": good_curves,
+            "curve_fits": good_curves_fits,
         },
         open(results.args.debug_path / "boot_anchor_data.pkl", "wb")
     )
 
     results.kde_lower_bounds = kde_lower_bounds
     results.kde_upper_bounds = kde_upper_bounds
-    results.bootstrap_curves = good_curves
+    results.bootstrap_curves = [
+        c['fit_exp']['curve'] for c in good_curves_fits
+    ]
     results.bootstrap_rate_constants = good_rate_constants
     results.bootstrap_ki_fwhm = ki_fwhm
 

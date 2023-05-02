@@ -10,6 +10,21 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
     start_dt = datetime.now()
     logger.info(f"Creating MP Queue at {start_dt.strftime('%Y-%m-%d %I:%M')}")
 
+    def queue_consumer(task_q, rslt_q, pid):
+        print(f"  process {pid} is alive and checking the queue.")
+        while True:
+            # Get the next set of parameters to minimize
+            msg = task_q.get()
+            if msg is None:
+                break
+            else:
+                # Save results to the result queue,
+                print(f"  process {pid} sending worker tuple "
+                      f"for region {msg[0]}...", flush=True)
+                rslt_q.put(fxn(msg))
+
+        print(f"  process {pid} consumed a None and is exiting.")
+
     # Fill the queue with jobs
     task_queue = mp.Queue()
     for argument_tuple in list_of_args:
@@ -22,12 +37,12 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
     # Create processes to handle the jobs
     processes = []
     rslt_queue = mp.Queue()
-    for pid in range(num_cpus):
+    for proc_id in range(num_cpus):
         proc = mp.Process(
-            target=fxn, args=(task_queue, rslt_queue, pid)
+            target=queue_consumer, args=(task_queue, rslt_queue, proc_id)
         )
         # proc.daemon = True  # process run in background and clean up its mess
-        print(f"  start process {pid}")
+        print(f"  start process {proc_id}")
         proc.start()
         processes.append(proc)
     # All processes are now running separately.
