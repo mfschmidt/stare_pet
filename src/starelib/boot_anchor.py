@@ -468,6 +468,7 @@ def boot_anchor(results):
         c['fit_exp']['curve'] for c in good_curves_fits
     ]
     results.bootstrap_rate_constants = good_rate_constants
+    results.bootstrap_kis = kis
     results.bootstrap_ki_fwhm = ki_fwhm
 
     # Write plots to visualize the bootstrapping

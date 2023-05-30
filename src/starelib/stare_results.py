@@ -47,6 +47,7 @@ class StareResults(Results):
         self.kde_upper_bounds = None
         self.bootstrap_curves = []
         self.bootstrap_rate_constants = []
+        self.bootstrap_kis = None
         self.bootstrap_ki_fwhm = None
 
         # Data from simulated annealing
