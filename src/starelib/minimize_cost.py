@@ -4,7 +4,7 @@ from scipy.optimize import dual_annealing
 from datetime import datetime
 import pickle
 
-from .fitting_models import solve_stttm
+from .fitting_models import solve_stttm, TwoTissueCompartmentModel
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import plot_all_stare_tac_fits
 from .util import from_cache, to_cache
@@ -53,11 +53,12 @@ def worker(arg_tuple):
         else:
             delta = f
         data_dict = {"f": f, "delta": delta, "context": context}
-        for i, p in enumerate(x):
-            data_dict[f"x{i + 1:00d}"] = p
+        for _, p in enumerate(x):
+            data_dict[f"x{_ + 1:00d}"] = p
         global_annealer_data.append(data_dict)
 
         # Return false to continue, true to stop with adequate results
+        # TODO: Determine a reasonable stopping condition
         return False
 
     # Workers get a single argument, so we must pack things into a tuple.
@@ -119,18 +120,32 @@ def worker(arg_tuple):
     }
 
 
-def minimize_cost_function(results, max_iter=6000, x0=None):
+def package_rate_constants(annealer_results, regions):
+    """ Pack rate constants into a simple dataframe """
+
+    final_rate_header = []
+    for k in ["1", "2", "3", "i", ]:
+        for i, region in enumerate(regions):
+            final_rate_header.append(f"k{k}_{region}")
+    final_rate_data = np.ndarray((len(regions), 4 * len(regions)))
+    for i, region in enumerate(regions):
+        final_rate_data[i, :] = np.concatenate(
+            [annealer_results[i]["result"]["x"], annealer_results[i]["ki"], ]
+        )
+    return pd.DataFrame(
+        data=final_rate_data, columns=final_rate_header
+    )
+
+
+def minimize_cost_function(results, x0=None):
     """ Find parameters for each region in corrected_tacs
 
         :param StareResults results: An object containing pipeline data
-        :param max_iter: Override the number of annealing iterations
         :param x0: x0 is randomized between bounds, but can be overridden here.
         :return: results, with additional data
     """
 
     # Manual configuration
-    # annealer always goes to max_iter, needs a callback for setting limits
-    max_iter = max_iter  # 20k is better, but is slow, about an hour per 5k.
     no_local_search = False
 
     # If we don't have a uniform set of timepoints for interpolation,
@@ -183,7 +198,7 @@ def minimize_cost_function(results, max_iter=6000, x0=None):
             (
                 i, sa_bounds, source_tac, results.fitted_hires_tac,
                 results.region_weights, w, target_tacs, ki_peaks,
-                max_iter, 5230, no_local_search, x0
+                results.args.annealer_iterations, 5230, no_local_search, x0
             )
         )
 
@@ -194,52 +209,13 @@ def minimize_cost_function(results, max_iter=6000, x0=None):
         worker, mp_args_list, results.args.num_cpus, results.logger
     )
 
-    # TODO: Package up lines 250-282 into a "package_rate_constants" function
     # Save the rate constants in an accessible csv format.
-    final_rate_header = []
-    for k in ["1", "2", "3", "i", ]:
-        for i, region in enumerate(results.corrected_tacs.columns):
-            final_rate_header.append(f"k{k}_{region}")
-    final_rate_data = np.ndarray((
-        len(results.corrected_tacs.columns),
-        4 * len(results.corrected_tacs.columns)
-    ))
-    for i, region in enumerate(results.corrected_tacs.columns):
-        final_rate_data[i, :] = np.concatenate(
-            [annealer_results[i]["result"]["x"], annealer_results[i]["ki"], ]
-        )
-    final_rate_df = pd.DataFrame(
-        data=final_rate_data, columns=final_rate_header
-    )
-    final_rate_df.to_csv(
-        results.args.output_path / "final_stare_all_rate_constants.csv",
-        index=False
-    )
-    final_rate_mean_df = pd.DataFrame(
-        data=np.mean(final_rate_data, axis=0).reshape(
-            (1, 4 * len(results.corrected_tacs.columns))
-        ),
-        columns=final_rate_header,
-        index=pd.Index(
-            ["n/a" if results.args.subject is None else results.args.subject, ],
-            name="subject"
-        ),
-    )
-    final_rate_mean_df.to_csv(
-        results.args.output_path / "final_stare_mean_rate_constants.csv",
-        index=False
+    final_rate_df = package_rate_constants(
+        annealer_results,
+        regions=results.corrected_tacs.columns,
     )
 
-    fig = plot_all_stare_tac_fits(
-        results.corrected_tacs, results.mid_times, annealer_results
-    )
-    fig.savefig(results.args.fig_path / f"step-5_final_fits.png")
-
-    results.annealer_bounds = sa_bounds
-    results.annealer_results = annealer_results
-    results.final_rate_df = final_rate_df
-
-    return results
+    return sa_bounds, annealer_results, final_rate_df
 
 
 def minimize_parameter_cost(results):
@@ -255,7 +231,7 @@ def minimize_parameter_cost(results):
     start_time = datetime.now()
     logger.info(f"Starting simulated annealing at {start_time}")
 
-    cache_file = "step-5_minimized_params.pkl"
+    cache_file = f"sub-{results.args.subject}_step-5_minimized_params.pkl"
     sa_results = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -272,27 +248,53 @@ def minimize_parameter_cost(results):
     else:
         logger.info("  loaded cached step 5 curve fits to save time")
 
-    if sa_results.args.debug:
+    # Store annealer results in the global results object
+    results.annealer_bounds = sa_results[0]
+    results.annealer_results = sa_results[1]
+    results.final_rate_df = pd.DataFrame(sa_results[2])
+
+    if results.args.debug:
         pickle.dump(
-            sa_results,
-            (sa_results.args.cache_path / "step-5_results.pkl").open("wb")
+            results,
+            (results.args.cache_path /
+             f"sub-{results.args.subject}_step-5_results.pkl"
+             ).open("wb")
         )
 
     print("Finished simulated annealing at {}, after {}".format(
         datetime.now(), datetime.now() - start_time
     ))
 
-    num_regions = len(sa_results.regions)
-    for idx, region in enumerate(sa_results.regions):
-        src_params = sa_results.annealer_results[idx]['result'].x
-        k1 = src_params[(0 * num_regions) + idx]
-        k2 = src_params[(1 * num_regions) + idx]
-        k3 = src_params[(2 * num_regions) + idx]
-        rpt_sect.add_line(
-            f"{sa_results.regions[idx]}: "
-            f"ki = {np.multiply(k1, np.divide(k3, (k2 + k3)))}; "
-            f"k1 = {k1:0.4f}; k2 = {k2:0.4f}; k3 = {k3:0.4f}."
-        )
+    results.final_rate_df.to_csv(
+        results.args.output_path /
+        f"sub-{results.args.subject}_final_stare_all_rate_constants.csv",
+        index=False
+    )
+    final_rate_mean_df = pd.DataFrame(
+        data=np.mean(results.final_rate_df.values, axis=0).reshape(
+            (4, len(results.corrected_tacs.columns))
+        ).T,
+        columns=["k1", "k2", "k3", "ki"],
+        index=results.corrected_tacs.columns,
+    )
+    final_rate_mean_df.to_csv(
+        results.args.output_path /
+        f"sub-{results.args.subject}_final_stare_mean_rate_constants.csv",
+        index=False
+    )
+
+    caption = "Final TACs plotted by source region"
+    fig = plot_all_stare_tac_fits(
+        results.corrected_tacs, results.mid_times, results.annealer_results,
+        title=f"{results.args.subject} final TAC fits by source region"
+    )
+    filename = f"sub-{results.args.subject}_step-5_final_fits.png"
+    fig.savefig(results.args.fig_path / filename)
+    rpt_sect.add_figure(results.args.fig_path / filename, caption)
+
+    rpt_sect.add_line(final_rate_mean_df.to_html(
+        float_format=lambda _: f"{_:0.4f}"
+    ), log=False)
 
     rpt_sect.end()
-    return sa_results
+    return results
