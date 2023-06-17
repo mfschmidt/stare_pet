@@ -66,7 +66,7 @@ def correct_partial_volumes(results):
     # Collect all the 3d image data into a single 4d structure.
     combined_image = combine_volumes_into_4d(
         pvc_images,
-        results.args.output_path / f"{results.args.subject}_pvc.nii.gz",
+        results.args.output_path / f"sub-{results.args.subject}_pvc.nii.gz",
         logger=logger
     )
 
@@ -105,12 +105,15 @@ def correct_partial_volumes(results):
 
     pickle.dump(
         results.pvc_mean_vascular_tac,
-        open(results.args.debug_path / "tac_pvc.pkl", "wb")
+        open(results.args.debug_path /
+             f"sub-{results.args.subject}_tac_pvc.pkl",
+             "wb")
     )
     tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
-        results.args.output_path / "step-2_pvc_mean_tac.csv"
+        results.args.output_path /
+        f"sub-{results.args.subject}_step-2_pvc_mean_tac.csv"
     )
-    logger.info("WROTE step-2_pvc_mean_tac.csv to "
+    logger.info(f"WROTE sub-{results.args.subject}_step-2_pvc_mean_tac.csv to "
                 f"{str(results.args.output_path)}")
 
     # Paint a picture of progress so far
@@ -133,10 +136,15 @@ def correct_partial_volumes(results):
         title=f"Subject {results.args.subject} Vascular TACs",
         palette=tac_plot_palette,
     )
-    fig_top_tacs.savefig(results.args.fig_path / "step-2_four_tacs.png")
+    fig_top_tacs.savefig(results.args.fig_path /
+                         f"sub-{results.args.subject}_step-2_four_tacs.png")
 
     caption = "All TACs through PVC"
-    rpt_sect.add_figure(results.args.fig_path / "step-2_four_tacs.png", caption)
+    rpt_sect.add_figure(
+        results.args.fig_path /
+        f"sub-{results.args.subject}_step-2_four_tacs.png",
+        caption
+    )
 
     rpt_sect.end()
     return results
