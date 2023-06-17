@@ -121,7 +121,7 @@ def func2tc_model_opt(xs, uniform_mid_times, mid_times,
     return weighted_residual
 
 
-def get_initial_parameters(n=6, init_params=None):
+def randomize_stacked_exponential_parameters(n=6, init_params=None):
     """ Use init_params, if provided, and randomize other parameters.
 
         :param int n: how many parameters to return
@@ -172,7 +172,7 @@ def find_curve_fits(
     failures = []
     while len(successes) < success_limit and len(failures) < failure_limit:
         np.random.seed = 42 * (len(failures) + 7)
-        p0 = get_initial_parameters(6)
+        p0 = randomize_stacked_exponential_parameters(6)
         try:
             # Fit the data to the model, returning parameters and covariance.
             retval = curve_fit(
@@ -365,3 +365,23 @@ def solve_stttm(
     ) + k_i_penalty
 
     return impulse_response_func, target_tac_fits, k_i, k_i_penalty, cost
+
+
+class TwoTissueCompartmentModel:
+    """ Save parameters for a 2TC model """
+
+    def __init__(self, k1, k2, k3, desc=""):
+        self.k1 = k1
+        self.k2 = k2
+        self.k3 = k3
+        self.ki = self.k1 * (self.k3 / (self.k2 + self.k3))
+        self.desc = desc
+
+    def __str__(self):
+        return(
+            "'{desc}': ki = k1 * (k3 / (k2 + k3)) = "
+            "{k1:0.2f} * ({k3:0.2f} / ({k2:0.2f} + {k3:0.2f})) = "
+            "{ki:0.2f}".format(
+                desc=self.desc, ki=self.ki, k1=self.k1, k2=self.k2, k3=self.k3
+            )
+        )
