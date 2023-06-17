@@ -13,7 +13,7 @@ from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
 from .mp_queues import run_in_mp_queue
 
 
-class CurveGenerator():
+class CurveGenerator:
     """ An object that generates random curves
 
         Instantiate the object, then call object.new() any time you want
@@ -152,15 +152,28 @@ def fit_curves_mp(
 
     # Support random curve generation, on the fly, as many times as necessary,
     # based on actual TAC plus random noise
-    curve_generator = CurveGenerator(
-        results.pvc_mean_vascular_tac.post_peak_activity(),
-        results.pvc_mean_vascular_tac.post_peak_sd(),
-        distribution='uniform', seed=999
-    )
+    # curve_generator = CurveGenerator(
+    #     results.pvc_mean_vascular_tac.post_peak_activity(),
+    #     results.pvc_mean_vascular_tac.post_peak_sd(),
+    #     distribution='uniform', seed=998
+    # )
+    # Using one curve generator seems to have created a few very similar
+    # curves. So below, there's a separate Generator, each with its own
+    # seed, for each curve desired. There are many ways to do this, and
+    # this is probably not the most efficient, but it does work.
 
     list_of_args = [(
-        i, curve_generator, results.pvc_mean_vascular_tac, uniform_tac,
-        results.corrected_tacs, num_2tc_params, results.args.vasc_corr_pct
+        i,
+        CurveGenerator(
+            results.pvc_mean_vascular_tac.post_peak_activity(),
+            results.pvc_mean_vascular_tac.post_peak_sd(),
+            distribution='uniform', seed=998 + i
+        ),
+        results.pvc_mean_vascular_tac,
+        uniform_tac,
+        results.corrected_tacs,
+        num_2tc_params,
+        results.args.vasc_corr_pct
     ) for i in range(num_curves)]
 
     curve_fit_results = run_in_mp_queue(
@@ -187,7 +200,6 @@ def fit_curve_to_regional_tacs(
     upper_bounds = np.ones((1, num_2tc_params))
 
     regions = corrected_regional_tacs.columns
-    bootstrap_rate_constants = np.zeros((len(regions), num_2tc_params))
 
     # Assess each fit curve as an adjuster to regional tacs
     # Reset rate constants and bounds for each curve
@@ -211,9 +223,11 @@ def fit_curve_to_regional_tacs(
         # Score adjusted TAC for 2TCM fit
         successes, failures = 0, 0
         while successes < 1 and failures < 10:
-            # Generate random rate constants between lower_ & upper_bounds
+            # Generate random rate constants between lower & upper_bounds
             two_sd = upper_bounds - lower_bounds
-            x0 = lower_bounds + (two_sd * [rng.random() for _ in range(num_2tc_params)])
+            x0 = lower_bounds + (
+                    two_sd * [rng.random() for _ in range(num_2tc_params)]
+            )
             # Use weights, not sigmas, for func2tc_model. It weights
             # residuals within the function, not depending on the
             # curve fitting library to do so.
@@ -324,6 +338,8 @@ def worker(arg_tuple):
           f"at {worker_start.strftime('%m/%d %I:%M')}", flush=True)
 
     cumulative_errors = []
+    failed_bootstrap_curves = []
+    bootstrap_curve, rate_constants, exp_fit = None, None, None
     final_curve = None
     while final_curve is None:
 
@@ -336,6 +352,7 @@ def worker(arg_tuple):
         )
         cumulative_errors = cumulative_errors + fit_exp_errors
         if exp_fit is None:
+            failed_bootstrap_curves.append(bootstrap_curve)
             continue
 
         # Third, fit the exponentials onto actual data.
@@ -349,6 +366,7 @@ def worker(arg_tuple):
         ]]
         cumulative_errors = cumulative_errors + fit_tac_errors
         if len(good_rate_constants) == 0:
+            failed_bootstrap_curves.append(bootstrap_curve)
             continue
         else:
             final_curve = good_rate_constants  # triggers break from while loop
@@ -360,6 +378,7 @@ def worker(arg_tuple):
 
     return {
         "i": i,
+        "failed_bootstrap_curves": failed_bootstrap_curves,
         "bootstrap_curve": bootstrap_curve,
         "fit_exp": exp_fit,
         "rate_constants": rate_constants,
@@ -382,7 +401,7 @@ def boot_anchor(results):
     # which resulted in about 500-600 "good" curves,
     # which resulted in about 100-200 "fit" curves.
     # We are now targeting 500 fit curves, however many seeds that takes.
-    bootstrap_iterations = 500
+    bootstrap_iterations = results.args.bootstrap_iterations
 
     # Currently, only FDG is supported. Other tracers would require
     # changes to this 2TCirr. We would then have to check the tracer.
@@ -401,7 +420,7 @@ def boot_anchor(results):
     # Attempt to fit each bootstrap curve to the stacked exponential decay model
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
-    cache_file = "step-4_bootstrap_curve_fits.pkl"
+    cache_file = f"sub-{results.args.subject}_step-4_bootstrap_curve_fits.pkl"
     good_curves_fits = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -413,8 +432,9 @@ def boot_anchor(results):
         to_cache(good_curves_fits, results.args.cache_path, cache_file)
     else:
         logger.info("  loaded cached step 4 curve fits to save time")
-    rpt_sect.add_line(f"From {bootstrap_iterations} random curves, "
-                      f"{len(good_curves_fits)} good curves were found.")
+
+    num_failures = np.sum([len(r['errors']) for r in good_curves_fits])
+    num_total_bootstraps = len(good_curves_fits) + num_failures
 
     if len(good_curves_fits) == 0:
         logger.error("FAILURE: No curves could be fit!!")
@@ -446,6 +466,7 @@ def boot_anchor(results):
         ki_fwhm[i], _x, _y = get_kde_fwhm_points(kis[:, i])
 
     # For recursive plotting fixes:
+    pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pkl"
     pickle.dump(
         {
             "regional_tacs": results.corrected_tacs,
@@ -459,7 +480,7 @@ def boot_anchor(results):
             "uniform_tac": uniform_tac,
             "curve_fits": good_curves_fits,
         },
-        open(results.args.debug_path / "boot_anchor_data.pkl", "wb")
+        open(results.args.debug_path / pickle_name, "wb")
     )
 
     results.kde_lower_bounds = kde_lower_bounds
@@ -470,6 +491,36 @@ def boot_anchor(results):
     results.bootstrap_rate_constants = good_rate_constants
     results.bootstrap_kis = kis
     results.bootstrap_ki_fwhm = ki_fwhm
+
+    # Plot all bootstrap curves
+    fig_all_curves = plot_bootstrap_curves(
+        results.bootstrap_curves, results.fitted_hires_tac,
+        results.pvc_mean_vascular_tac, results.args.subject,
+        skip_outliers=False,
+    )
+    figure_name = "sub-{}_step-4_all_bootstrap_curves.png".format(
+        results.args.subject,
+    )
+    fig_all_curves.savefig(results.args.fig_path / figure_name)
+
+    # Plot most bootstrap curves
+    fig_most_curves = plot_bootstrap_curves(
+        results.bootstrap_curves, results.fitted_hires_tac,
+        results.pvc_mean_vascular_tac, results.args.subject,
+        skip_outliers=True,
+    )
+    figure_name = "sub-{}_step-4_most_bootstrap_curves.png".format(
+        results.args.subject,
+    )
+    fig_most_curves.savefig(results.args.fig_path / figure_name)
+    caption = "Bootstrap curves used for fitting the stacked exponentials"
+    # A 'right' image should come before everything else,
+    # so text flows alongside.
+    rpt_sect.add_figure(results.args.fig_path / figure_name, caption,
+                        style='right')
+
+    rpt_sect.add_line(f"From {num_total_bootstraps} random bootstrap curves, "
+                      f"{len(good_curves_fits)} good curves were found.")
 
     # Write plots to visualize the bootstrapping
     # Plot densities of each constant
@@ -485,22 +536,17 @@ def boot_anchor(results):
             subject=results.args.subject,
             tracer=results.args.tracer,
         )
-        figure_name = f"step-4_bootstrap_{k_const}_density_by_region.png"
+        figure_name = "sub-{}_step-4_bootstrap_{}_density_by_region.png".format(
+            results.args.subject, k_const
+        )
         fig.savefig(results.args.fig_path / figure_name)
         caption = f"Bootstrapped rate constant boundaries for {k_const}"
         rpt_sect.add_figure(results.args.fig_path / figure_name, caption)
 
-    # Plot all bootstrap curves
-    fig = plot_bootstrap_curves(
-        results.bootstrap_curves, results.fitted_hires_tac,
-        results.pvc_mean_vascular_tac, results.args.subject
-    )
-    fig.savefig(results.args.fig_path / f"step-4_bootstrap_curves.png")
-
     if results.args.debug:
+        pickle_name = f"sub-{results.args.subject}_step-4_results.pkl"
         pickle.dump(
-            results,
-            (results.args.cache_path / "step-4_results.pkl").open("wb")
+            results, (results.args.cache_path / pickle_name).open("wb")
         )
 
     rpt_sect.end()
