@@ -61,6 +61,14 @@ def get_argument_parser():
         help="Brain region names to be quantified in STARE."
     )
     parser.add_argument(
+        "--bootstrap-iterations", type=int, default=500,
+        help="How many bootstrapped curves shall be fit to feed the annealer?"
+    )
+    parser.add_argument(
+        "--annealer-iterations", type=int, default=5000,
+        help="How many iterations should the annealer be capped at?"
+    )
+    parser.add_argument(
         "-f", "--options-file", type=str,
         help="A file containing command-line arguments."
              "The arguments in the file will override defaults,"
