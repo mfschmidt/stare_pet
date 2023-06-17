@@ -179,7 +179,8 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
         if len(vascular_centroids) > 0:
             peak_idxs = np.array([c.peak_index for c in vascular_centroids])
             earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
-            # Of the vascular centroids peaking at the same earliest time, which is highest?
+            # Of the vascular centroids peaking at the same earliest time,
+            # which is highest?
             highest_early_peak_idx = earliest_peak_idxs[
                 np.argmax([vascular_centroids[i].peak_value
                            for i in earliest_peak_idxs])
@@ -187,7 +188,7 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
             # Label this centroid as best, at least for this value of k
             vascular_centroids[highest_early_peak_idx].best_in_k = True
             logger.debug(
-                "  Best centroid [{}] has peak of {:0.3f} at time idx {}".format(
+                "  Best centroid [{}] has peak of {:0.3f} at t idx {}".format(
                     vascular_centroids[highest_early_peak_idx].label,
                     vascular_centroids[highest_early_peak_idx].peak_value,
                     vascular_centroids[highest_early_peak_idx].peak_index,
@@ -208,7 +209,8 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
     # Which time point is most likely to have the highest value?
     best_centroid_idx = top_indices[np.argmax(top_frequencies)]
 
-    # Make a list of best-in-k centroids that peak at the same, most common, time point
+    # Make a list of best-in-k centroids that peak at the same,
+    # most common, time point
     centroids_with_best_idx = [
         c for c in best_in_k_centroids
         if (c.peak_index == best_centroid_idx)
@@ -279,7 +281,7 @@ def find_peripheral_centroids(data, ks, mid_times=None, verbose=0):
             # Label this centroid as best, at least for this value of k
             vascular_centroids[highest_early_peak_idx].best_in_k = True
             logger.debug(
-                "  Best centroid [{}] has peak of {:0.3f} at time idx {}".format(
+                "  Best centroid [{}] has peak of {:0.3f} at t idx {}".format(
                     vascular_centroids[highest_early_peak_idx].label,
                     vascular_centroids[highest_early_peak_idx].peak_value,
                     vascular_centroids[highest_early_peak_idx].peak_index,
