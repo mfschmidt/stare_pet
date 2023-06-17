@@ -148,7 +148,9 @@ def save_centroid_masks(centroids, mask_output_path,
 
 def cluster(results, cluster_function, data, ks, step):
     # If prior models were saved to disk, load them rather than running.
-    cache_file = f"step-1-{step}_centroids_and_fits.pkl"
+    cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
+        results.args.subject, step
+    )
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -252,7 +254,7 @@ def two_step_cluster(results):
     top_centroid_fig = plot_top_centroids_atlas(
         best_masks[1], best_masks[2], pet_avg_img,
     )
-    filename = f"step-1-vascular_cluster_masks.png"
+    filename = f"sub-{results.args.subject}_step-1-vascular_cluster_masks.png"
     top_centroid_fig.savefig(results.args.fig_path / filename)
     caption = "Step one (orange) and step two (red) vascular clusters"
     rpt_sect.add_figure(results.args.fig_path / filename, caption)
@@ -261,7 +263,7 @@ def two_step_cluster(results):
     for step in [1, 2, ]:
         # Plot the TACs from vascular cluster centroids.
         fig = plot_vascular_tacs(results.cluster_centroids[step])
-        filename = f"step-1-{step}_vascular_tacs.png"
+        filename = f"sub-{results.args.subject}_step-1-{step}_vascular_tacs.png"
         fig.savefig(results.args.fig_path / filename)
         logger.info(f"WROTE {filename} to {str(results.args.fig_path)}")
 
@@ -269,13 +271,15 @@ def two_step_cluster(results):
         rpt_sect.add_figure(results.args.fig_path / filename, caption)
 
         # These data can be used to build custom plots or otherwise explore.
-        filename = f"step-1-{step}_kmeans_tac.csv"
+        filename = f"sub-{results.args.subject}_step-1-{step}_kmeans_tac.csv"
         tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
             results.args.output_path / filename
         )
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
-        filename = f"step-1-{step}_kmeans_centroid.pkl"
+        filename = "sub-{}_step-1-{}_kmeans_centroid.pkl".format(
+            results.args.subject, step
+        )
         pickle.dump(
             best_of(results.cluster_centroids[step]),
             open(results.args.output_path / "debug" / filename, "wb")
