@@ -28,6 +28,19 @@ betsy_palette = {
 }
 
 
+def palette_from_tac_regions(data):
+    """ Generate a palette to cover all regions in data.
+    """
+
+    palette = dict()
+    for region in data.columns:
+        if region not in betsy_palette.keys():
+            palette[region] = 'gray'
+    palette.update(betsy_palette)
+
+    return palette
+
+
 def tacs_to_plottable_dataframe(tacs):
     """ Format dictionaries into a plottable dataframe
 
@@ -414,7 +427,7 @@ def plot_bootstrap_constant(
 
 
 def plot_bootstrap_curves(
-        curves, time_tac, vasc_tac, subject
+        curves, time_tac, vasc_tac, subject, skip_outliers=False
 ):
     """ """
 
@@ -426,7 +439,16 @@ def plot_bootstrap_curves(
         name=f"mean of {len(curves)} curves",
     )
 
-    # Add all curves to a dataframe of TACs
+    curve_means = np.mean(np.array(curves), axis=0)
+    curve_stds = np.std(np.array(curves), axis=0)
+    if skip_outliers:
+        curve_mins = curve_means - 2 * curve_stds
+        curve_maxs = curve_means + 2 * curve_stds
+    else:
+        curve_mins = np.min(np.array(curves), axis=0)
+        curve_maxs = np.max(np.array(curves), axis=0)
+
+    # Add curves to a dataframe of TACs, but only if they lie within thresholds
     df = tacs_to_plottable_dataframe(
         [
             TimeActivityCurve(
@@ -435,6 +457,10 @@ def plot_bootstrap_curves(
                 source=f"bootstrap {i}",
                 name=f"bootstrap curve {i}",
             ) for i in range(len(curves))
+            if np.sum([
+                ((_ < curve_mins[j]) or (_ > curve_maxs[j]))
+                for j, _ in enumerate(curves[i])
+            ]) == 0
         ] + [
             mean_tac, vasc_tac
         ])
@@ -495,7 +521,7 @@ def plot_density(
     indices = rng.choice(len(rate_constants), num_bootstraps)
     plottable_rcs = np.take(rate_constants, indices, axis=0)
     sns.histplot(
-        plottable_rcs, bins=100, stat='probability', kde=True,
+        plottable_rcs, bins=100, stat='probability', kde=False,
         color=hist_color, alpha=0.50,
         ax=ax
     )
@@ -751,6 +777,8 @@ def plot_stare_tac_fits(
     source_data = plottable_data[plottable_data["region"] == source_region]
     target_data = plottable_data[plottable_data["region"] != source_region]
 
+    tac_palette = palette_from_tac_regions(tac_data)
+
     plottable_fits = melt_tac_dataframe(pd.DataFrame(
         data=target_fits,
         columns=[f"fit_{col}" for col in tac_data.columns
@@ -765,7 +793,7 @@ def plot_stare_tac_fits(
     )
     sns.scatterplot(
         x="minutes", y="microCi", hue="region", data=target_data,
-        palette=betsy_palette,  # sns.color_palette("muted"),
+        palette=tac_palette,  # sns.color_palette("muted"),
         marker="$\circ$", ec='face', s=50,
         ax=axes[0]
     )
@@ -776,13 +804,13 @@ def plot_stare_tac_fits(
     # Bottom panel
     sns.scatterplot(
         x="minutes", y="microCi", hue="region", data=target_data,
-        palette=betsy_palette,  # sns.color_palette("muted"),
+        palette=tac_palette,  # sns.color_palette("muted"),
         marker="$\circ$", ec='face', s=50,
         ax=axes[1]
     )
     sns.lineplot(
         x="minutes", y="microCi", hue="region", data=plottable_fits,
-        palette=betsy_palette, marker=None,
+        palette=tac_palette, marker=None,
         ax=axes[1]
     )
     axes[1].legend(bbox_to_anchor=(1.04, 0.5),
@@ -796,7 +824,7 @@ def plot_stare_tac_fits(
 
 def plot_all_stare_tac_fits(
         tac_data, mid_times, optimizations, comparisons=None,
-        figsize=(10.0, 7.5),
+        figsize=(10.0, 7.5), title="TAC Fits",
 ):
     """ Plot TACs from simulated annealing fitting,
 
@@ -804,9 +832,14 @@ def plot_all_stare_tac_fits(
         and in a simulated annealing debugger script.
     """
 
-    fig, axes = plt.subplots(nrows=2, ncols=3, figsize=figsize)
+    fig = plt.figure(figsize=figsize, layout="tight")
+    gs = gridspec.GridSpec(2, 3, figure=fig)
+    ax_handles = []
+    ax_labels = []
 
     plottable_data = melt_tac_dataframe(tac_data, mid_times)
+
+    tac_palette = palette_from_tac_regions(tac_data)
 
     row, col = 0, -1
     for i, source_region in enumerate(tac_data.columns):
@@ -815,37 +848,41 @@ def plot_all_stare_tac_fits(
         if col > 2:
             col = 0
             row = row + 1
-        panel = axes[row, col]
+        panel = fig.add_subplot(gs[row, col])
 
         # Divide and format the data for plotting
+        src_optimization = None
+        for optimization in optimizations:
+            if optimization['source_tac'].name == source_region:
+                src_optimization = optimization
         source_data = plottable_data[plottable_data["region"] == source_region]
         target_data = plottable_data[plottable_data["region"] != source_region]
         plottable_fits = melt_tac_dataframe(pd.DataFrame(
-            data=optimizations[i]["tgt_tac_fits"],
+            data=src_optimization['tgt_tac_fits'],
             columns=[f"fit_{col}" for col in tac_data.columns
                      if col not in [source_region, 't', ]],
         ), mid_times)
 
         # Draw each panel
         panel.set_title(
-            "Source ({}) and target TACs\n(fit cost {:0.4f})".format(
-                source_region, optimizations[i]["cost"]
+            "Target TACs (source {})\n(fit cost {:0.5f})".format(
+                source_region, src_optimization["cost"]
             )
-        )
-        sns.scatterplot(
-            x="minutes", y="microCi", hue="region", data=target_data,
-            palette=betsy_palette,  # sns.color_palette("muted"),
-            marker="$\circ$", ec='face', s=60,
-            ax=panel
         )
         sns.lineplot(
             x="minutes", y="microCi", hue="region", data=plottable_fits,
-            palette=betsy_palette, marker=None,
+            palette=tac_palette, marker=None,
+            ax=panel
+        )
+        sns.scatterplot(
+            x="minutes", y="microCi", hue="region", data=target_data,
+            palette=tac_palette,  # sns.color_palette("muted"),
+            marker="$\circ$", ec='face', s=60,
             ax=panel
         )
         sns.scatterplot(
             x="minutes", y="microCi", data=source_data,
-            color=betsy_palette[source_region], marker="*", s=120,
+            color=tac_palette[source_region], marker="*", s=120,
             label=f"{source_region} (source)",
             ax=panel
         )
@@ -860,7 +897,7 @@ def plot_all_stare_tac_fits(
             ), mid_times, )
             sns.lineplot(
                 x="minutes", y="microCi", hue="region", data=plottable_comp,
-                palette=betsy_palette, linestyle=":", linewidth=2,
+                palette=tac_palette, linestyle=":", linewidth=2,
                 label=None, legend=False, marker=None,
                 ax=panel
             )
@@ -871,12 +908,31 @@ def plot_all_stare_tac_fits(
             )
 
         # Legends
-        if col == 2:
-            panel.legend(bbox_to_anchor=(1.04, 0.5),
-                         loc="center left", borderaxespad=0)
-        else:
-            panel.get_legend().remove()
+        # Do not plot legends on axes. Create a new legend in the spare column
+        handles, labels = panel.get_legend_handles_labels()
+        ax_handles += handles
+        ax_labels += labels
+        panel.get_legend().remove()
 
+    # Prune the long list of multiple legend items
+    # and create a new legend, in order of regions
+    final_legend_handles, final_legend_labels = [], []
+    for label_template in ["{}", "fit_{}", ]:
+        for region in tac_data.columns:
+            data_source = label_template.format(region)
+            for i, label in enumerate(ax_labels):
+                if (
+                        label == data_source
+                        and label not in final_legend_labels
+                        and "source" not in ax_labels[i]
+                ):
+                    final_legend_handles.append(ax_handles[i])
+                    final_legend_labels.append(ax_labels[i])
+    fig.legend(
+        final_legend_handles, final_legend_labels,
+        bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0
+    )
+    fig.suptitle(title)
     fig.tight_layout()
 
     return fig
