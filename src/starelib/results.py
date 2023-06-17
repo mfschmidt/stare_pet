@@ -116,6 +116,15 @@ class Results:
         return datetime.now() - self._start_datetime
 
     def write_report(self):
-        self.report.write(self.args.output_path / f"{self.args.subject}.html")
+        self.report.write(
+            self.args.output_path / f"sub-{self.args.subject}.html"
+        )
         if self._args.debug:
-            pickle.dump(self, open(self.args.debug_path / "results.pkl", "wb"))
+            pickle.dump(
+                self,
+                open(
+                    self.args.debug_path /
+                    f"sub-{self._args.subject}_results.pkl",
+                    "wb"
+                )
+            )
