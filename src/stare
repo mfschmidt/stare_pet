@@ -32,7 +32,10 @@ def main(parsed_args):
         # structures we want to keep around.
         # We can read to it and write from it, and it keeps a log of
         # everything, so building a report at the end is easier.
-        results = StareResults("STARE", parsed_args)
+        results = StareResults(
+            f"STARE Results for {parsed_args.subject}",
+            parsed_args
+        )
         results = gather_data(results)
         results = two_step_cluster(results)
         results = correct_partial_volumes(results)
