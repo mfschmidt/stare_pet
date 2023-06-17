@@ -27,8 +27,9 @@ def select_best_fit(fits, weighted=True):
     return best_fit
 
 
-def interpolate_full_tac(actual_tac, best_fit, model,
-                         tac_name="high res decay model"):
+def interpolate_full_tac(
+        actual_tac, best_fit, model, tac_name="high res decay model"
+):
     """ Interpolate pre- and post-peak separately and return combined TAC.
 
         Actual time points are sparse and spread out non-linearly, but it
@@ -98,6 +99,26 @@ def interpolate_full_tac(actual_tac, best_fit, model,
     )
 
     return orig_res_tac, high_res_tac
+
+
+def html_equation_from_fit(fit):
+    """ Return html for an equation representing the best fit parameters.
+    """
+
+    best_params = fit.get("parameters")
+    pairs = sorted(
+        [
+            (best_params[0], best_params[1]),
+            (best_params[2], best_params[3]),
+            (best_params[4], best_params[5]),
+        ],
+        key=lambda pair: pair[0],
+        reverse=True
+    )
+    equation = " + ".join([
+        "{:0.2f}e^{{{:0.2f}t}}".format(pair[0], pair[1]) for pair in pairs
+    ])
+    return f"\\({equation}\\) with final wRMSE {fit.get('wrms'):0.3f}"
 
 
 def fit_vascular_mean_tac(results):
@@ -185,7 +206,7 @@ def fit_vascular_mean_tac(results):
     # Step 3. Correct TACs by extracting the mean signal from each cluster.
     # Needs to know about ignored mid-times to weight durations appropriately
 
-    cache_file = "step-3_decay_model_fits.pkl"
+    cache_file = f"sub-{results.args.subject}_step-3_decay_model_fits.pkl"
     successes_and_failures = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -207,13 +228,14 @@ def fit_vascular_mean_tac(results):
         failures = successes_and_failures[1]
         logger.info("  loaded cached step 3 decay model fits to save time")
 
-    rpt_sect.add_line(f"{len(successes)} curves were successfully fit, "
-                      f"amid {len(failures)} failures, "
-                      f"to the three-level exponential decay model.")
     if results.args.debug_path is not None:
         pickle.dump(
             successes,
-            open(results.args.debug_path / f"fits.pkl", "wb")
+            open(
+                results.args.debug_path /
+                f"sub-{results.args.subject}_fits.pkl",
+                "wb"
+            )
         )
     best_fit = select_best_fit(successes)
     lores_tac, hires_tac = interpolate_full_tac(
@@ -223,18 +245,35 @@ def fit_vascular_mean_tac(results):
     lores_tac.sd = results.pvc_mean_vascular_tac.sd
 
     fig = plot_detailed_tacs([lores_tac, hires_tac])
-    fig_name = "step-3_fits_hi_v_lo.png"
+    fig_name = f"sub-{results.args.subject}_step-3_fits_hi_v_lo.png"
     fig.savefig(results.args.fig_path / fig_name)
     caption = f"Decay model fit in high and low resolution"
-    rpt_sect.add_figure(results.args.fig_path / fig_name, caption)
+    rpt_sect.add_figure(results.args.fig_path / fig_name, caption,
+                        style='right')
+
+    rpt_sect.add_line(f"{len(successes)} curves were successfully fit, "
+                      f"amid {len(failures)} failures, "
+                      f"to the three-level exponential decay model. "
+                      "The best fit (past the peak) is shown below in "
+                      "original and high resolution.")
+    rpt_sect.add_line(html_equation_from_fit(best_fit), style='equation')
+
     if results.args.verbose > 0 and results.args.debug_path is not None:
         pickle.dump(
             lores_tac,
-            open(results.args.debug_path / f"tac_from_fitting.pkl", "wb")
+            open(
+                results.args.debug_path /
+                f"sub-{results.args.subject}_tac_from_fitting.pkl",
+                "wb"
+            )
         )
         pickle.dump(
             hires_tac,
-            open(results.args.debug_path / f"hires_tac_from_fitting.pkl", "wb")
+            open(
+                results.args.debug_path /
+                f"sub-{results.args.subject}_hires_tac_from_fitting.pkl",
+                "wb"
+            )
         )
 
     # Return the one best, properly weighted, interpolated TAC in original res.
