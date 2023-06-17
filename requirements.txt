@@ -6,7 +6,7 @@
 #
 cycler==0.11.0
     # via matplotlib
-fonttools==4.39.3
+fonttools==4.40.0
     # via matplotlib
 humanize==4.6.0
     # via stare-pet (pyproject.toml)
@@ -20,7 +20,7 @@ matplotlib==3.7.1
     #   stare-pet (pyproject.toml)
 nibabel==5.1.0
     # via stare-pet (pyproject.toml)
-numpy==1.24.3
+numpy==1.25.0
     # via
     #   matplotlib
     #   nibabel
@@ -33,7 +33,7 @@ packaging==23.1
     # via
     #   matplotlib
     #   nibabel
-pandas==2.0.1
+pandas==2.0.2
     # via
     #   seaborn
     #   stare-pet (pyproject.toml)
@@ -66,4 +66,4 @@ threadpoolctl==3.1.0
 # setuptools
 
 nilearn==0.10.1
-setuptools==67.7.2
+setuptools==67.8.0
