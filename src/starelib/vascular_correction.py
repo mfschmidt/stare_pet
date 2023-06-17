@@ -14,10 +14,23 @@ def tac_vascular_correction(results):
     rpt_sect = results.report.begin_section("Regional TAC vascular correction")
 
     pct = results.args.vasc_corr_pct / 100.0
+    if results.args.vasc_corr_pct == 0:
+        rpt_sect.add_line(
+            "No vascular correction was applied, so there is "
+            "no before or after, just raw TACs."
+        )
+        caption = "Raw TACs, with no vascular correction"
+    else:
+        rpt_sect.add_line(
+            f"Vascular correction of {pct:0.2%} was applied to the raw TACs."
+        )
+        caption = "TACs before and after vascular correction"
+
     fit_tac = results.fitted_tac.activity
     corrected_tacs = pd.DataFrame(
         data=np.zeros(results.tacs.shape),
-        columns=results.regions,
+        columns=results.tacs.columns,
+        index=results.tacs.index,
     )
     for r in results.regions:
         corrected_tacs.loc[:, r] = (
@@ -26,16 +39,20 @@ def tac_vascular_correction(results):
 
     # Write out the corrected tacs as a csv file
     corrected_tacs.to_csv(
-        results.args.debug_path / "step-3_corrected_tacs.tsv",
+        results.args.debug_path /
+        f"sub-{results.args.subject}_step-3_corrected_tacs.tsv",
         sep='\t', index=False,
     )
     fig = plot_before_and_after_tacs(
         results.tacs, corrected_tacs, results.mid_times,
     )
-    fig.savefig(results.args.fig_path / "step-3_vascular_corrected_tacs.png")
-    caption = "TACs before and after vascular correction"
+    fig.savefig(
+        results.args.fig_path /
+        f"sub-{results.args.subject}_step-3_vascular_corrected_tacs.png"
+    )
     rpt_sect.add_figure(
-        results.args.fig_path / "step-3_vascular_corrected_tacs.png",
+        results.args.fig_path /
+        f"sub-{results.args.subject}_step-3_vascular_corrected_tacs.png",
         caption
     )
 
