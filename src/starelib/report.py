@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import re
 import platform
+import multiprocessing
 
 
 class Section:
@@ -31,27 +32,33 @@ class Section:
         else:
             return self._end_datetime - self._start_datetime
 
-    def add_line(self, line, style=None, log=True):
-        if style is None:
+    def add_line(self, line, css_class=None, log=True):
+        if css_class is None:
             self.items.append(f"<p>{line}</p>")
         else:
-            self.items.append(f"<p style='{style}'>{line}</p>")
+            self.items.append(f"<p class='{css_class}'>{line}</p>")
         if log:
             self._report.logger.info(line)
 
-    def add_figure(self, fig_path, caption, style=None):
+    def add_link(self, url, text=None, css_class=None):
+        css_class_str = ""
+        if css_class is not None:
+            css_class_str = " class='{css_class}'"
+        if text is None:
+            text = url
+        self.items.append(f"<p><a{css_class_str} href=\"{url}\">{text}</a></p>")
+
+    def add_figure(self, fig_path, caption, css_class=None):
         rel_path = str(Path(fig_path).relative_to(self._report.path.parent))
-        if style is None:
-            width = "90%"
-            style_str = ""
+        if css_class is None:
+            css_class_str = ""
         else:
-            width = "50%"
-            style_str = f" style='{style}'"
-        img_tag = f"<img src=\"{rel_path}\" style=\"width: {width}\">"
+            css_class_str = f" class='{css_class}'"
+        img_tag = f"<img src=\"{rel_path}\" style=\"width: 90%\">"
         caption_tag = f"<figcaption>{caption}</figcaption>"
         img_html = "\n".join([
             f"<a href=\"{rel_path}\">",
-            f"<figure{style_str}>", img_tag, caption_tag, "</figure>",
+            f"<figure{css_class_str}>", img_tag, caption_tag, "</figure>",
             "</a>",
         ])
         self.items.append(f"{img_html}")
@@ -67,7 +74,7 @@ class Section:
             duration = self._end_datetime - self._start_datetime
             return "\n".join([
                 f"\n<div>",
-                "<h2>{self.title}</h2>",
+                f"<h2>{self.title}</h2>",
                 "<p class='{}'>Started at {} ({} in) and took {}</p>".format(
                     'subtext',
                     self._start_datetime.strftime(self._dt_format),
@@ -139,7 +146,7 @@ class Report:
             "<style>",
             "table {padding: 4px; }",
             "td {padding: 4px; }",
-            "h2 {clear: both}",
+            "h2 {clear: both; }",
             "figure {",
             "  clear: both;",
             "  text-align: center; font-style: italic; font-size: smaller;",
@@ -147,9 +154,9 @@ class Report:
             "}",
             ".subtext {color: black; font-size: small; font-style: italic; }",
             ".equation {text-align: center; }",
-            ".left_fig {float: left; width: 50%}",
-            ".right_fig {float: right; width: 50%}",
-            ".clearfix::after {content: ''; clear: both; display: table;}",
+            ".left_fig {float: left; width: 49%; }",
+            ".right_fig {float: right; width: 49%; }",
+            ".clearfix::after {content: ''; clear: both; display: table; }",
             "</style>\n",
         ])
 
@@ -178,7 +185,8 @@ class Report:
             f.write("<body>\n")
             f.write(f"<h1>{self.title}</h1>\n")
             f.write(f"<p class='subtext'>running {self.app_name} version "
-                    f"{self.app_version} on {platform.platform()}.</p>\n")
+                    f"{self.app_version} on {platform.platform()}. "
+                    f"System has {multiprocessing.cpu_count()} CPUs.</p>\n")
             for sect in sorted(self.sections, key=lambda x: x.start_time):
                 f.write(sect.html())
             f.write("<footer class='subtext'><br />STARE "

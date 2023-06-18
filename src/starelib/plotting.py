@@ -82,7 +82,8 @@ def tacs_to_plottable_dataframe(tacs):
 
 
 def plot_vascular_tacs(
-        data, vascular_color='blue', highlight_color='red', ax=None
+        data, vascular_color='blue', highlight_color='red',
+        tall=False, ax=None
 ):
     """ Plot a time activity curve (TAC), in one panel
 
@@ -94,12 +95,17 @@ def plot_vascular_tacs(
                                vascular TACs for each value of k
         :param highlight_color: The color of highlight laid over the best of
                                 all vascular TACs
+        :param tall: Shrink the legend and move it to the bottom
         :param ax: Optionally draw on your own axes
         :returns Figure:
     """
 
+    if tall:
+        figsize=(6, 6)
+    else:
+        figsize=(10, 6)
     if ax is None:
-        fig, axes = plt.subplots(figsize=(10, 6))
+        fig, axes = plt.subplots(figsize=figsize)
     else:
         fig, axes = ax.get_figure(), ax
 
@@ -122,9 +128,15 @@ def plot_vascular_tacs(
                  legend=False, ax=axes)
 
     # Next, plot the centroids that are the best for their k-means group
-    sns.lineplot(data=data[data['best_in_k']], x="t", y="activity",
-                 hue='name', palette=vascs, alpha=0.5, linewidth=1,
-                 label="", ax=axes)
+    sns.lineplot(
+        data=data[data['best_in_k']], x="t", y="activity",
+        hue='name', palette=vascs, alpha=0.5, linewidth=1,
+        ax=axes
+    )
+    if tall:
+        # clear all legend labels, allowing the next lineplot to make a new one.
+        for line in axes.lines:
+            line.set_label(s='')
 
     # Finally, plot the very best centroid of the whole batch.
     best_k = data[data['best_overall']]['k'].unique()[0]
@@ -136,7 +148,14 @@ def plot_vascular_tacs(
     # Finish off the details so the plot is readable.
     axes.set_xlabel("Minutes")  # ranges 0 to 60
     axes.set_ylabel("Activity/cc")  # ranges -0.05 to +0.30
-    axes.legend(bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0)
+    if tall:
+        axes.legend(
+            bbox_to_anchor=(0.5, -0.15), loc="upper center", borderaxespad=0
+        )
+    else:
+        axes.legend(
+            bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0
+        )
     fig.suptitle(f"Optimal vascular TACs: {data['k'].min()}-{data['k'].max()}"
                  " k-means clusters")
     fig.tight_layout()

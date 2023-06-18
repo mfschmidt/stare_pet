@@ -298,7 +298,7 @@ def get_4D_data(
         logger=logger
     )
 
-    section.add_line(f"Loaded PET data from '{img_file}'. "
+    section.add_line(f"Loaded PET data from <code>'{img_file}'</code>. "
                      f"It contained {original_shape[3]} volumes, "
                      f"each shaped {combined_image.shape[0:3]}. "
                      + extra_sentence)
@@ -311,12 +311,20 @@ def gather_data(results):
 
     logger = results.logger
     rpt_sect = results.report.begin_section("Gather Data")
+    issued_command = " ".join(sys.argv)
 
     logger.debug(f"{results.name} is running with these arguments.")
     for k, v in vars(results.args).items():
         spaces = " " * (23 - len(k))
         logger.debug(f"  '{k}'{spaces}: {v}")
-    logger.info(f"The command issued: '{' '.join(sys.argv)}'")
+    logger.info(f"The command issued: '{issued_command}'")
+
+    rpt_sect.add_line("\n".join([
+        "The stare_pet command executed:<br />",
+        "<pre>",
+        issued_command.replace("--", "\\\n--"),
+        "</pre>",
+    ]))
 
     # Assume everything's good until we encounter a problem.
     ok_to_run = True
@@ -337,7 +345,7 @@ def gather_data(results):
                 logger.warning(f"   {region}")
         logger.info(f"Running with {len(tacs.columns)} regions:"
                     f"    [{', '.join(tacs.columns)}]")
-        rpt_sect.add_line(f"Loaded TACs from '{tacs_file}'. "
+        rpt_sect.add_line(f"Loaded TACs from <code>'{tacs_file}'</code>. "
                           f"Using {len(tacs.columns)} regions.")
 
     results.original_tacs = full_tacs
@@ -355,8 +363,10 @@ def gather_data(results):
             logger.error(f"  tried '{str(failed_file)}'")
         ok_to_run = False
     else:
-        rpt_sect.add_line(f"Loaded mid_times from '{mid_times_file}'. "
-                          f"Running with {len(mid_times)} time points.")
+        rpt_sect.add_line(
+            f"Loaded mid_times from <code>'{mid_times_file}'</code>. "
+            f"Running with {len(mid_times)} time points."
+        )
 
     results.mid_times = mid_times
     results.ignored_mid_times = ignored_mid_times
@@ -373,7 +383,7 @@ def gather_data(results):
             logger.error(f"  tried '{str(failed_file)}'")
         logger.warning("STARE doesn't need plasma, but plots it if available.")
     else:
-        rpt_sect.add_line(f"Found plasma data in '{plasma_file}'.")
+        rpt_sect.add_line(f"Found plasma data in <code>'{plasma_file}'</code>.")
 
     if args.debug:
         pickle.dump(

@@ -289,12 +289,18 @@ def minimize_parameter_cost(results):
         title=f"{results.args.subject} final TAC fits by source region"
     )
     filename = f"sub-{results.args.subject}_step-5_final_fits.png"
-    fig.savefig(results.args.fig_path / filename)
+    fig.savefig(results.args.fig_path / filename, bbox_inches='tight')
     rpt_sect.add_figure(results.args.fig_path / filename, caption)
 
     rpt_sect.add_line(final_rate_mean_df.to_html(
         float_format=lambda _: f"{_:0.4f}"
     ), log=False)
+
+    rpt_sect.add_link(
+        results.args.output_path /
+        f"sub-{results.args.subject}_final_stare_all_rate_constants.csv",
+        text="Table of all source/target rate constants"
+    )
 
     rpt_sect.end()
     return results

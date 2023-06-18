@@ -262,13 +262,18 @@ def two_step_cluster(results):
     # Plot the TACs from the first k-means step
     for step in [1, 2, ]:
         # Plot the TACs from vascular cluster centroids.
-        fig = plot_vascular_tacs(results.cluster_centroids[step])
+        fig = plot_vascular_tacs(results.cluster_centroids[step], tall=True)
         filename = f"sub-{results.args.subject}_step-1-{step}_vascular_tacs.png"
         fig.savefig(results.args.fig_path / filename)
         logger.info(f"WROTE {filename} to {str(results.args.fig_path)}")
 
-        caption = f"K-Means Vascular Clustering, Step {step}."
-        rpt_sect.add_figure(results.args.fig_path / filename, caption)
+        caption = f"See figure: K-Means Vascular Clustering, Step {step}"
+        # rpt_sect.add_figure(
+        #     results.args.fig_path / filename,
+        #     caption,
+        #     css_class={1: 'left_fig', 2: 'right_fig'}[step]
+        # )
+        rpt_sect.add_link(results.args.fig_path / filename, text=caption)
 
         # These data can be used to build custom plots or otherwise explore.
         filename = f"sub-{results.args.subject}_step-1-{step}_kmeans_tac.csv"

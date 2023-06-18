@@ -118,7 +118,7 @@ def html_equation_from_fit(fit):
     equation = " + ".join([
         "{:0.2f}e^{{{:0.2f}t}}".format(pair[0], pair[1]) for pair in pairs
     ])
-    return f"\\({equation}\\) with final wRMSE {fit.get('wrms'):0.3f}"
+    return f"$${equation}$$ with final wRMSE {fit.get('wrms'):0.3f}"
 
 
 def fit_vascular_mean_tac(results):
@@ -249,14 +249,14 @@ def fit_vascular_mean_tac(results):
     fig.savefig(results.args.fig_path / fig_name)
     caption = f"Decay model fit in high and low resolution"
     rpt_sect.add_figure(results.args.fig_path / fig_name, caption,
-                        style='right')
+                        css_class='right_fig')
 
     rpt_sect.add_line(f"{len(successes)} curves were successfully fit, "
                       f"amid {len(failures)} failures, "
                       f"to the three-level exponential decay model. "
                       "The best fit (past the peak) is shown below in "
                       "original and high resolution.")
-    rpt_sect.add_line(html_equation_from_fit(best_fit), style='equation')
+    rpt_sect.add_line(html_equation_from_fit(best_fit), css_class='equation')
 
     if results.args.verbose > 0 and results.args.debug_path is not None:
         pickle.dump(

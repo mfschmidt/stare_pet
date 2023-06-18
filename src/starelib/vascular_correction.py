@@ -14,17 +14,6 @@ def tac_vascular_correction(results):
     rpt_sect = results.report.begin_section("Regional TAC vascular correction")
 
     pct = results.args.vasc_corr_pct / 100.0
-    if results.args.vasc_corr_pct == 0:
-        rpt_sect.add_line(
-            "No vascular correction was applied, so there is "
-            "no before or after, just raw TACs."
-        )
-        caption = "Raw TACs, with no vascular correction"
-    else:
-        rpt_sect.add_line(
-            f"Vascular correction of {pct:0.2%} was applied to the raw TACs."
-        )
-        caption = "TACs before and after vascular correction"
 
     fit_tac = results.fitted_tac.activity
     corrected_tacs = pd.DataFrame(
@@ -38,6 +27,17 @@ def tac_vascular_correction(results):
         )
 
     # Write out the corrected tacs as a csv file
+    if results.args.vasc_corr_pct == 0:
+        report_line = (
+            "No vascular correction was applied, so there is "
+            "no before or after, just raw TACs."
+        )
+        caption = "Raw TACs, with no vascular correction"
+    else:
+        report_line = (
+            f"Vascular correction of {pct:0.2%} was applied to the raw TACs."
+        )
+        caption = "TACs before and after vascular correction"
     corrected_tacs.to_csv(
         results.args.debug_path /
         f"sub-{results.args.subject}_step-3_corrected_tacs.tsv",
@@ -53,8 +53,10 @@ def tac_vascular_correction(results):
     rpt_sect.add_figure(
         results.args.fig_path /
         f"sub-{results.args.subject}_step-3_vascular_corrected_tacs.png",
-        caption
+        caption, css_class='right_fig',
     )
+
+    rpt_sect.add_line(report_line)
 
     results.corrected_tacs = corrected_tacs
 

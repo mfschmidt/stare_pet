@@ -514,10 +514,10 @@ def boot_anchor(results):
     )
     fig_most_curves.savefig(results.args.fig_path / figure_name)
     caption = "Bootstrap curves used for fitting the stacked exponentials"
-    # A 'right' image should come before everything else,
+    # A 'right_fig' image should come before everything else,
     # so text flows alongside.
     rpt_sect.add_figure(results.args.fig_path / figure_name, caption,
-                        style='right')
+                        css_class='right_fig')
 
     rpt_sect.add_line(f"From {num_total_bootstraps} random bootstrap curves, "
                       f"{len(good_curves_fits)} good curves were found.")
