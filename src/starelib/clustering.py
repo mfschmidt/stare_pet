@@ -157,6 +157,7 @@ def cluster(results, cluster_function, data, ks, step):
     if cached_data is None:
         centroids, model_fits = cluster_function(
             data, ks, mid_times=results.mid_times,
+            num_cpus=results.args.num_cpus,
             verbose=results.args.verbose
         )
         to_cache(

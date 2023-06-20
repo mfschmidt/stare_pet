@@ -7,7 +7,7 @@ from .centroid import Centroid
 
 
 def likely_irreversible(c):
-    """ Retrun true if centroid appears irreversible.
+    """ Return true if centroid appears irreversible.
 
         :param Centroid c: The centroid to assess
         :return: True if irreversible, False otherwise
@@ -19,7 +19,7 @@ def likely_irreversible(c):
 
 
 def likely_noise(c):
-    """ Retrun true if centroid appears to just be noise.
+    """ Return true if centroid appears to just be noise.
 
         :param Centroid c: The centroid to assess
         :return: True if noise, False otherwise
@@ -31,7 +31,7 @@ def likely_noise(c):
 
 
 def likely_vascular(c):
-    """ Retrun true if centroid appears vascular.
+    """ Return true if centroid appears vascular.
 
         :param Centroid c: The centroid to assess
         :return: True if vascular, False otherwise
@@ -43,7 +43,7 @@ def likely_vascular(c):
 
 
 def likely_peripheral(c):
-    """ Retrun true if centroid appears peripheral.
+    """ Return true if centroid appears peripheral.
 
         :param Centroid c: The centroid to assess
         :return: True if peripheral, False otherwise
@@ -58,7 +58,7 @@ def likely_peripheral(c):
     return len(c.activity) > 0
 
 
-def find_centroids(data, ks, features, mid_times=None, verbose=0):
+def find_centroids(data, ks, features, mid_times=None, num_cpus=-1, verbose=0):
     """ Step 1. From all PET data, find a vascular cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -69,6 +69,7 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
         :param iterable ks: Iterable of integers, each used as a k in k-means
         :param features: A dict of functions to assign features to centroids
         :param iterable mid_times: will be stored alongside activity in TACs
+        :param num_cpus: How many CPUs to deploy on multiprocessing
         :param int verbose: Set non-zero to increase logging, higher is more
 
         :returns tuple: The best TAC, and all the TACs
@@ -84,6 +85,9 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
     for k in ks:
         logger.info(f"K-means (k={k})")
         pre_1k_timestamp = datetime.now()
+        # I'd like to pass num_cpus to KMeans, but KMeans just tries to use
+        # all the CPUs it can and doesn't allow an argument to control that.
+        # Setting OMP_NUM_THREADS as an environment variable seems to work.
         k_means = KMeans(init="k-means++", n_clusters=k,
                          n_init=3, max_iter=1024**2, random_state=42,
                          verbose=verbose, )
@@ -134,7 +138,7 @@ def find_centroids(data, ks, features, mid_times=None, verbose=0):
     return all_centroids, k_means_fits
 
 
-def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
+def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
     """ Step 1. From all PET data, find a vascular cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -144,6 +148,7 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
         :param ndarray data: Array of timeseries
         :param iterable ks: Iterable of integers, each used as a k in k-means
         :param iterable mid_times: will be stored alongside activity in TACs
+        :param int num_cpus: how many processes to use on finding centroids
         :param int verbose: Set non-zero to increase logging, higher is more
 
         :returns tuple: The best TAC, and all the TACs
@@ -157,7 +162,8 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
         "likely_vascular": likely_vascular,
     }
     all_centroids, k_means_fits = find_centroids(
-        data, ks, vascular_features, mid_times=mid_times, verbose=verbose
+        data, ks, vascular_features, mid_times=mid_times,
+        num_cpus=num_cpus, verbose=verbose
     )
 
     for k in ks:
@@ -230,7 +236,7 @@ def find_vascular_centroids(data, ks, mid_times=None, verbose=0):
     return all_centroids, k_means_fits
 
 
-def find_peripheral_centroids(data, ks, mid_times=None, verbose=0):
+def find_peripheral_centroids(data, ks, num_cpus=-1, mid_times=None, verbose=0):
     """ Step 1. From all PET data, find a peripheral cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -239,6 +245,7 @@ def find_peripheral_centroids(data, ks, mid_times=None, verbose=0):
 
         :param ndarray data: Array of timeseries
         :param iterable ks: Iterable of integers, each used as a k in k-means
+        :param int num_cpus: How many processes to use finding centroids
         :param iterable mid_times: will be stored alongside activity in TACs
         :param int verbose: Set non-zero to increase logging, higher is more
 
@@ -253,7 +260,8 @@ def find_peripheral_centroids(data, ks, mid_times=None, verbose=0):
         "likely_vascular": likely_vascular,
     }
     all_centroids, k_means_fits = find_centroids(
-        data, ks, vascular_features, mid_times=mid_times, verbose=verbose
+        data, ks, vascular_features, mid_times=mid_times,
+        num_cpus=num_cpus, verbose=verbose
     )
 
     for k in ks:
