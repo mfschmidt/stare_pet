@@ -17,11 +17,7 @@ are available via [github pages](https://mfschmidt.github.io/stare_pet/).
 
 ## Installation
 
-stare_pet is not yet available via pypi.
-
-    pip install stare_pet
-
-But it is in this github repository
+stare_pet is not yet available via pypi, but it is in this github repository
 
     git clone https://github.com/mfschmidt/stare_pet
     pip install ./stare_pet
