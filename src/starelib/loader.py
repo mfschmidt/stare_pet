@@ -386,10 +386,8 @@ def gather_data(results):
         rpt_sect.add_line(f"Found plasma data in <code>'{plasma_file}'</code>.")
 
     if args.debug:
-        pickle.dump(
-            plasma_tac,
-            open(args.debug_path / "tac_plasma.pkl", "wb")
-        )
+        with open(args.debug_path / "tac_plasma.pkl", "wb") as f:
+            pickle.dump(plasma_tac, f)
 
     results.plasma_tac = plasma_tac
     results.source_plasma_tac_file = plasma_file

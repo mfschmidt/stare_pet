@@ -286,10 +286,10 @@ def two_step_cluster(results):
         filename = "sub-{}_step-1-{}_kmeans_centroid.pkl".format(
             results.args.subject, step
         )
-        pickle.dump(
-            best_of(results.cluster_centroids[step]),
-            open(results.args.output_path / "debug" / filename, "wb")
-        )
+        with open(results.args.output_path / "debug" / filename, "wb") as f:
+            pickle.dump(
+                best_of(results.cluster_centroids[step]), f
+            )
 
         best_vascular_mask_path = save_centroid_masks(
             results.cluster_centroids[step],

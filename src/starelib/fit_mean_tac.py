@@ -229,14 +229,12 @@ def fit_vascular_mean_tac(results):
         logger.info("  loaded cached step 3 decay model fits to save time")
 
     if results.args.debug_path is not None:
-        pickle.dump(
-            successes,
-            open(
+        with open(
                 results.args.debug_path /
                 f"sub-{results.args.subject}_fits.pkl",
                 "wb"
-            )
-        )
+        ) as f:
+            pickle.dump(successes, f)
     best_fit = select_best_fit(successes)
     lores_tac, hires_tac = interpolate_full_tac(
         results.pvc_mean_vascular_tac, best_fit, decay_model
@@ -259,22 +257,18 @@ def fit_vascular_mean_tac(results):
     rpt_sect.add_line(html_equation_from_fit(best_fit), css_class='equation')
 
     if results.args.verbose > 0 and results.args.debug_path is not None:
-        pickle.dump(
-            lores_tac,
-            open(
+        with open(
                 results.args.debug_path /
                 f"sub-{results.args.subject}_tac_from_fitting.pkl",
                 "wb"
-            )
-        )
-        pickle.dump(
-            hires_tac,
-            open(
+        ) as f:
+            pickle.dump(lores_tac, f)
+        with open(
                 results.args.debug_path /
                 f"sub-{results.args.subject}_hires_tac_from_fitting.pkl",
                 "wb"
-            )
-        )
+        ) as f:
+            pickle.dump(hires_tac, f)
 
     # Return the one best, properly weighted, interpolated TAC in original res.
     # This can be used to reduce the vascular influence on measured TACs later.
