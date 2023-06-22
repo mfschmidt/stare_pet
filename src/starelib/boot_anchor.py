@@ -131,7 +131,12 @@ def fit_curve_to_exponential(bootstrap_curve, vascular_tac, uniform_tac):
             post_peak_boot_curve_fit_uniform
         ])
         if np.any(full_boot_curve_fit_uniform < 0.0):
-            failures.append((0, "good fit, but had negatives"))
+            failures.append({
+                "code": 1,
+                "fit": "exp",
+                "desc": "good fit, but had negatives",
+                "p0": fit['p0'],
+            })
             return None, failures
         else:
             fit['curve'] = full_boot_curve_fit_uniform
@@ -213,6 +218,7 @@ def fit_curve_to_regional_tacs(
     )
 
     fit_errors = []
+    fit_successes = []
     for j, region in enumerate(regions):
         # Adjust regional TAC by bootstrapped vascular activity
         raw_activity = corrected_regional_tacs[region].values
@@ -248,19 +254,44 @@ def fit_curve_to_regional_tacs(
                 # This should only happen once per j, and not overwrite rcs
                 successes += 1
                 rate_constants[j, :] = np.real(ls_result.x)
+                fit_successes.append({
+                    "code": 0,
+                    "fit": "tac",
+                    "desc": "successful fit",
+                    "p0": list(x0.ravel()),
+                })
             else:
                 # This can happen repeatedly, no harm in overwriting nans
-                fit_errors.append((11, "least squares failure to fit"))
+                fit_errors.append({
+                    "code": 21,
+                    "fit": "tac",
+                    "desc": "least squares failure to fit",
+                    "p0": list(x0.ravel()),
+                })
                 failures += 1
 
     # If any of the fits, for any of the regions is near 0 or 1,
     # invalidate the whole thing. 2TCM should not be 0 or 1
+    if len(fit_successes) > 0:
+        p0 = fit_successes[-1]['p0']
+    else:
+        p0 = []
     if np.any(np.abs(rate_constants.ravel() < 0.0001)):
         rate_constants[:, :] = np.nan
-        fit_errors.append((12, "least squares produced a zero rate constant"))
+        fit_errors.append({
+            "code": 22,
+            "fit": "tac",
+            "desc": "least squares produced a zero rate constant",
+            "p0": p0,
+        })
     elif np.any(np.abs(1.0 - rate_constants.ravel()) < 0.0001):
         rate_constants[:, :] = np.nan
-        fit_errors.append((13, "least squares produced a one rate constant"))
+        fit_errors.append({
+            "code": 23,
+            "fit": "tac",
+            "desc": "least squares produced a one rate constant",
+            "p0": p0,
+        })
 
     return rate_constants, fit_errors
 
@@ -467,21 +498,22 @@ def boot_anchor(results):
 
     # For recursive plotting fixes:
     pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pkl"
-    pickle.dump(
-        {
-            "regional_tacs": results.corrected_tacs,
-            "good_rate_constants": good_rate_constants,
-            "kis": kis,
-            "kde_lower_bounds": kde_lower_bounds,
-            "kde_upper_bounds": kde_upper_bounds,
-            "kde_peaks": kde_peaks,
-            "kde_fwhm": kde_fwhm,
-            "ki_fwhm": ki_fwhm,
-            "uniform_tac": uniform_tac,
-            "curve_fits": good_curves_fits,
-        },
-        open(results.args.debug_path / pickle_name, "wb")
-    )
+    with open(results.args.debug_path / pickle_name, "wb") as f:
+        pickle.dump(
+            {
+                "regional_tacs": results.corrected_tacs,
+                "good_rate_constants": good_rate_constants,
+                "kis": kis,
+                "kde_lower_bounds": kde_lower_bounds,
+                "kde_upper_bounds": kde_upper_bounds,
+                "kde_peaks": kde_peaks,
+                "kde_fwhm": kde_fwhm,
+                "ki_fwhm": ki_fwhm,
+                "uniform_tac": uniform_tac,
+                "curve_fits": good_curves_fits,
+            },
+            f
+        )
 
     results.kde_lower_bounds = kde_lower_bounds
     results.kde_upper_bounds = kde_upper_bounds
@@ -545,9 +577,8 @@ def boot_anchor(results):
 
     if results.args.debug:
         pickle_name = f"sub-{results.args.subject}_step-4_results.pkl"
-        pickle.dump(
-            results, (results.args.cache_path / pickle_name).open("wb")
-        )
+        with open(results.args.cache_path / pickle_name, "wb") as f:
+            pickle.dump(results, f)
 
     rpt_sect.end()
     return results
