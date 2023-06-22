@@ -102,13 +102,13 @@ def correct_partial_volumes(results):
         source="pvc",
         name="pvc",
     )
+    with open(
+            results.args.debug_path /
+            f"sub-{results.args.subject}_tac_pvc.pkl",
+            "wb"
+    ) as f:
+        pickle.dump(results.pvc_mean_vascular_tac, f)
 
-    pickle.dump(
-        results.pvc_mean_vascular_tac,
-        open(results.args.debug_path /
-             f"sub-{results.args.subject}_tac_pvc.pkl",
-             "wb")
-    )
     tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
         results.args.output_path /
         f"sub-{results.args.subject}_step-2_pvc_mean_tac.csv"

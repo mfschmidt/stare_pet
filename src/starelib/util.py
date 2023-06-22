@@ -278,11 +278,13 @@ def from_cache(cache_path, filename, force=False):
     if cache_path is not None and cache_path.exists():
         cache_file = cache_path / filename
     if cache_file is not None and cache_file.exists() and not force:
-        thing = pickle.load(cache_file.open("rb"))
+        with open(cache_file, "rb") as f:
+            thing = pickle.load(f)
 
     return thing
 
 
 def to_cache(thing, cache_path, filename):
     cache_file = cache_path / filename
-    pickle.dump(thing, cache_file.open("wb"))
+    with cache_file.open("wb") as f:
+        pickle.dump(thing, f)

@@ -120,11 +120,8 @@ class Results:
             self.args.output_path / f"sub-{self.args.subject}.html"
         )
         if self._args.debug:
-            pickle.dump(
-                self,
-                open(
-                    self.args.debug_path /
-                    f"sub-{self._args.subject}_results.pkl",
-                    "wb"
-                )
-            )
+            with open(
+                self.args.debug_path / f"sub-{self._args.subject}_results.pkl",
+                "wb"
+            ) as f:
+                pickle.dump(self, f)

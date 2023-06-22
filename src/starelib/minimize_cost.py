@@ -254,12 +254,12 @@ def minimize_parameter_cost(results):
     results.final_rate_df = pd.DataFrame(sa_results[2])
 
     if results.args.debug:
-        pickle.dump(
-            results,
-            (results.args.cache_path /
-             f"sub-{results.args.subject}_step-5_results.pkl"
-             ).open("wb")
-        )
+        with open(
+            results.args.cache_path /
+            f"sub-{results.args.subject}_step-5_results.pkl",
+            "wb"
+        ) as f:
+            pickle.dump(results, f)
 
     print("Finished simulated annealing at {}, after {}".format(
         datetime.now(), datetime.now() - start_time
