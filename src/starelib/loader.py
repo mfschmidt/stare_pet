@@ -7,6 +7,7 @@ from pathlib import Path
 import nibabel as nib
 from humanize import ordinal
 import pickle
+from csv import Sniffer
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import Image, image_in_millicuries,\
@@ -86,30 +87,53 @@ def get_tsv_data(input_path, subject_id, contents, tracer, logger=None):
         return data, f
 
 
-def get_tacs(args, logger=None):
+def get_tacs(results):
     """ Find a tacs file and read its data
 
-    :param args: command line arguments
-    :param logger: logger to report out findings
-    :return pandas.DataFrame: TACs
+    :param results: an object containing all the global data for stare_pet
+    :return results: an object containing all the global data for stare_pet
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
-
-    tac_df, tac_file = get_tsv_data(
-        args.input_path, args.subject, "tacs", args.tracer, logger
-    )
-    if tac_df is None:
-        return None, None, tac_file
-    good_regions = [r for r in args.regions if r in tac_df.columns]
-    if args.ignore_frames is not None and len(args.ignore_frames) > 0:
-        final_tac_df = tac_df.drop(
-            np.asarray(args.ignore_frames) - 1, axis=0
+    # If an explicit TAC file was specified, use it.
+    if results.args.tac_file is not None:
+        # There is no safe way to assume comma or tab or space delimited.
+        # so before reading, we'll sniff the second line of the file and
+        # use that as a delimiter. Still not bullet-proof, but a good bet.
+        sniffer = Sniffer()
+        delimiter = "\t" if results.args.tac_file.suffix == ".tsv" else ","
+        with open(results.args.tac_file, "r") as f:
+            for row in range(2):
+                delimiter = sniffer.sniff(next(f).strip()).delimiter
+        results.original_tacs = pd.read_csv(
+            results.args.tac_file, header=0, index_col=None, sep=delimiter
         )
-        return tac_df, final_tac_df[good_regions], tac_file
+        results.source_tacs_path = results.args.tac_file
+
+        if 'MidTime' in results.original_tacs.columns:
+            results.original_mid_times = results.original_tacs[['MidTime', ]]
+            results.original_mid_times.columns = ['t', ]
+
+    # Else, find one in the input_path
     else:
-        return tac_df, tac_df[good_regions], tac_file
+        results.original_tacs, results.source_tacs_path = get_tsv_data(
+            results.args.input_path, results.args.subject, "tacs",
+            results.args.tracer, results.logger
+        )
+
+    good_regions = [r for r in results.args.regions
+                    if r in results.original_tacs.columns]
+    if (
+            (results.args.ignore_frames is not None) and
+            (len(results.args.ignore_frames) > 0)
+    ):
+        final_tac_df = results.original_tacs.drop(
+            np.asarray(results.args.ignore_frames) - 1, axis=0
+        )
+        results.tacs = final_tac_df[good_regions]
+    else:
+        results.tacs = results.original_tacs[good_regions]
+
+    return results
 
 
 def get_plasma(input_path, subject_id, tracer, logger=None):
@@ -142,49 +166,49 @@ def get_plasma(input_path, subject_id, tracer, logger=None):
         return None, plasma_file
 
 
-def get_mid_times(
-        input_path, subject_id, frames_to_ignore, tracer, logger=None
-):
+def get_mid_times(results):
     """ Find a mid-times file and read its data
 
-    :param input_path: path to find subjects
-    :param subject_id: name of subject folder
-    :param frames_to_ignore: ignored frames to cut from the list
-    :param str tracer: what tracer was injected
-    :param logger: where to send messages
-    :return tuple: array of raw mid-times, mid-times w/o ignored frames
+    :param results: an object containing all global data for stare_pet
+    :return results: an object containing all global data for stare_pet
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
-
-    mid_times, mt_file = get_tsv_data(
-        input_path, subject_id, "midtimes", tracer, logger
-    )
-    if (len(frames_to_ignore) > 0) and mid_times is not None:
-        logger.warning(
-            f"  {len(frames_to_ignore)} frames being removed."
+    if results.original_mid_times is None:
+        # We need to find the mid_times file
+        local_mid_times, results.source_mid_times_path = get_tsv_data(
+            results.args.input_path, results.args.subject, "midtimes",
+            results.args.tracer, results.logger
         )
-        ignored_mid_times = mid_times[
-            mid_times.index.isin([f - 1 for f in frames_to_ignore])
+    else:
+        # mid_times were already loaded while reading the TACs file.
+        local_mid_times = results.original_mid_times
+        results.source_mid_times_path = results.source_tacs_path
+
+    if (len(results.args.ignore_frames) > 0) and local_mid_times is not None:
+        results.logger.warning(
+            f"  {len(results.args.ignore_frames)} frames being removed."
+        )
+        ignored_mid_times = local_mid_times[
+            local_mid_times.index.isin(
+                [f - 1 for f in results.args.ignore_frames]
+            )
         ]
         # Replace mid_times AFTER the ignored time point has been stored.
-        final_mid_times = mid_times[
-            ~mid_times.index.isin([f - 1 for f in frames_to_ignore])
+        final_mid_times = local_mid_times[
+            ~local_mid_times.index.isin(
+                [f - 1 for f in results.args.ignore_frames]
+            )
         ]
     else:
         ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
-        final_mid_times = mid_times
+        final_mid_times = local_mid_times
 
     if final_mid_times is not None and 't' in final_mid_times:
-        return (
-            mid_times['t'].values,
-            final_mid_times['t'].values,
-            ignored_mid_times['t'].values,
-            mt_file
-        )
-    else:
-        return None, None, None, mt_file
+        results.original_mid_times = local_mid_times['t'].values
+        results.mid_times = final_mid_times['t'].values
+        results.ignored_mid_times = ignored_mid_times['t'].values
+
+    return results
 
 
 def get_individual_volumes(
@@ -331,47 +355,41 @@ def gather_data(results):
     args = results.args
 
     # Read PET TAC data
-    full_tacs, tacs, tacs_file = get_tacs(results.args, logger)
-    if tacs is None:
+    results = get_tacs(results)
+    # full_tacs, tacs, tacs_file = get_tacs(results.args, logger)
+    if results.tacs is None:
         logger.error("Failed to load TACs")
-        for failed_file in tacs_file:  # list of files if none are found
+        for failed_file in results.source_tacs_path:
+            # list of attempted files if none were found
             logger.error(f"  tried '{str(failed_file)}'")
         ok_to_run = False
     else:
-        if len(tacs.columns) < len(args.regions):
-            dropped_regions = [r for r in args.regions if r not in tacs.columns]
+        if len(results.tacs.columns) < len(args.regions):
+            dropped_regions = [r for r in args.regions
+                               if r not in results.tacs.columns]
             logger.warning("Specified regions were NOT found in the TACs:")
             for region in dropped_regions:
                 logger.warning(f"   {region}")
-        logger.info(f"Running with {len(tacs.columns)} regions:"
-                    f"    [{', '.join(tacs.columns)}]")
-        rpt_sect.add_line(f"Loaded TACs from <code>'{tacs_file}'</code>. "
-                          f"Using {len(tacs.columns)} regions.")
-
-    results.original_tacs = full_tacs
-    results.tacs = tacs
-    results.source_tacs_path = tacs_file
+        logger.info(f"Running with {len(results.tacs.columns)} regions:"
+                    f"    [{', '.join(results.tacs.columns)}]")
+        rpt_sect.add_line("Loaded TACs from " 
+                          f"<code>'{str(results.source_tacs_path)}'</code>. "
+                          f"Using {len(results.tacs.columns)} regions.")
 
     # Find and load mid_times
-    all_mid_times, mid_times, ignored_mid_times, mid_times_file = get_mid_times(
-        args.input_path, args.subject, args.ignore_frames,
-        args.tracer, logger=logger
-    )
-    if mid_times is None:
+    results = get_mid_times(results)
+    if results.mid_times is None:
         logger.error("Failed to load midtimes")
-        for failed_file in mid_times_file:  # list of files if none are found
+        for failed_file in results.source_mid_times_path:
+            # list of attempted files if none are found
             logger.error(f"  tried '{str(failed_file)}'")
         ok_to_run = False
     else:
         rpt_sect.add_line(
-            f"Loaded mid_times from <code>'{mid_times_file}'</code>. "
-            f"Running with {len(mid_times)} time points."
+            "Loaded mid_times from "
+            f"<code>'{results.source_mid_times_path}'</code>. "
+            f"Running with {len(results.mid_times)} time points."
         )
-
-    results.mid_times = mid_times
-    results.ignored_mid_times = ignored_mid_times
-    results.original_mid_times = all_mid_times
-    results.source_mid_times_path = mid_times_file
 
     # Get plasma data if it's available, but this is not required.
     plasma_tac, plasma_file = get_plasma(
