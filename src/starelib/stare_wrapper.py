@@ -28,6 +28,10 @@ def get_argument_parser():
         help="Fast local storage for caching interim data",
     )
     parser.add_argument(
+        "--tac-file", type=Path, default=None,
+        help="Override searching through input-path with a specific file",
+    )
+    parser.add_argument(
         "-a", "--axial-slices-to-clip", type=int, default=0,
         help="Axial slices to clip.",
     )
@@ -112,6 +116,12 @@ def validate_arguments(args):
                           "at '{args.input_path}'.")
     else:
         errors.append(f"The input path, '{args.input_path}' does not exist.")
+    if args.tac_file is not None:
+        if not args.tac_file.exists():
+            errors.append(f"An explicit TAC file, '{str(args.tac_file)}' was "
+                          "specified, but it does not exist. If this file is "
+                          "in the input-dir, stare will look for it by default."
+                          " It does not need to be specified.")
 
     # Ensure the output location exists, and is writable.
     setattr(args, "output_path", Path(args.output_path))
@@ -180,5 +190,6 @@ def validate_arguments(args):
 
 
 def make_pvc_tac(results):
+    """ A stub that does nothing, yet """
 
     return results
