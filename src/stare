@@ -45,6 +45,7 @@ def main(parsed_args):
         results = minimize_parameter_cost(results)
         results.end()
         results.write_report()
+        results.save()
         return 0
     else:
         return 1
