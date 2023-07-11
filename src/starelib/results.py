@@ -117,11 +117,18 @@ class Results:
 
     def write_report(self):
         self.report.write(
-            self.args.output_path / f"sub-{self.args.subject}.html"
+            self._args.output_path / f"sub-{self._args.subject}.html"
         )
         if self._args.debug:
             with open(
-                self.args.debug_path / f"sub-{self._args.subject}_results.pkl",
+                self._args.debug_path / f"sub-{self._args.subject}_results.pkl",
                 "wb"
             ) as f:
                 pickle.dump(self, f)
+
+    def save(self):
+        with open(
+            self._args.output_path / f"sub-{self._args.subject}_results.pkl",
+            "wb"
+        ) as f:
+            pickle.dump(self, f)
