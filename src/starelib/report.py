@@ -7,11 +7,17 @@ import platform
 import multiprocessing
 
 
+# This can be overridden when someone creates a Report or Section object,
+# but all datetimes will be represented as text with this format otherwise.
+# '1999-01-30 23:59' - 24-hour hours (%H rather than %I) allow later html mining
+default_dt_fmt = "%Y-%m-%d %H:%M"
+
+
 class Section:
     """ A class to track each section of a report.
     """
 
-    def __init__(self, title, report, dt_format="%Y-%m-%d %I:%M"):
+    def __init__(self, title, report, dt_format=default_dt_fmt):
         self._start_datetime = datetime.now()
         self._end_datetime = None
         self._dt_format = dt_format
@@ -88,7 +94,7 @@ class Report:
     """ A class to keep track of events in time and write a final report.
     """
 
-    def __init__(self, title, file, logger=None, dt_format="%Y-%m-%d %I:%M:%S"):
+    def __init__(self, title, file, logger=None, dt_format=default_dt_fmt):
         self._start_datetime = datetime.now()
         self._end_datetime = None
         self._dt_format = dt_format
