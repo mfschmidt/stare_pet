@@ -15,7 +15,8 @@ from .centroid_heuristics import find_vascular_centroids
 
 
 def make_atlas_and_mask(
-        centroid, template_img, pad_inferior=0, out_path=None, file_desc=None
+        centroid, template_img,
+        pad_inferior=0, out_path=None, file_desc=None, logger=None
 ):
     """ Save a centroid's cluster as a mask.
 
@@ -31,10 +32,12 @@ def make_atlas_and_mask(
     :param Path out_path: If provided, directory for writing out atlas and mask
                           By default, these are not written to disk
     :param str file_desc: If provided, filename is overridden
+    :param logging.logger logger: If provided, write output to this logger
     :return: paths to atlas image and mask image
     """
 
-    logger = logging.getLogger("STARE")
+    if logger is None:
+        logger = logging.getLogger("STARE")
 
     # Shape the voxel labels into a 3d matrix to match the template image.
     cluster_atlas_data = reshape_labels_to_3d(
@@ -104,18 +107,24 @@ def best_of(centroids):
 
 def save_centroid_masks(centroids, mask_output_path,
                         current_template, original_template,
-                        axial_slices_to_clip=0, verbose=0):
+                        step=0, axial_slices_to_clip=0, verbose=0,
+                        logger=None):
     """ Save centroid masks to disk, return the best one
 
         :param list centroids: list of Centroid objects to write to disk
         :param Path mask_output_path: The path for writing out masks
         :param Nifti1Image current_template: An image in cropped cluster space
         :param Nifti1Image original_template: An image in original space
+        :param int step: which step generated this mask
         :param int axial_slices_to_clip: how many axial slices to remove
         :param int verbose: higher numbers indicate more verbosity
+        :param logging.logger logger: write output to logger if available
 
         :return nibabel.Nifti1Image: the best atlas image, in original space
     """
+
+    if logger is None:
+        logger = logging.get_logger("STARE")
 
     best_mask_path = None
     for centroid in centroids:
@@ -124,14 +133,17 @@ def save_centroid_masks(centroids, mask_output_path,
             # Specifying out_path causes masks to be written to disk.
             best_atlas_path, best_mask_path = make_atlas_and_mask(
                 centroid, current_template,
-                out_path=mask_output_path, file_desc="best"
+                out_path=mask_output_path,
+                file_desc=f"step-{step}_best",
+                logger=logger,
             )
             # Add back the cropped axial slices and save image in original space
             if axial_slices_to_clip > 0:
                 best_atlas_path, best_mask_path = make_atlas_and_mask(
                     centroid, original_template,
                     pad_inferior=axial_slices_to_clip,
-                    out_path=mask_output_path, file_desc="best"
+                    out_path=mask_output_path, file_desc=f"step-{step}_best",
+                    logger=logger,
                 )
         if verbose > 1:  # for all centroids, not just the best one
             # Specifying out_path causes masks to be written to disk.
@@ -139,7 +151,8 @@ def save_centroid_masks(centroids, mask_output_path,
             if (mask_output_path.parent / "debug").exists():
                 make_atlas_and_mask(
                     centroid, current_template,
-                    out_path=mask_output_path.parent / "debug"
+                    out_path=mask_output_path.parent / "debug",
+                    logger=logger,
                 )
 
     # This should be in original space, cropped sliced padded back
@@ -296,8 +309,10 @@ def two_step_cluster(results):
             results.args.output_path / "masks",
             results.cropped_4D.slicer[:, :, :, 0],
             results.input_4D.slicer[:, :, :, 0],
+            step=step,
             axial_slices_to_clip=results.args.axial_slices_to_clip,
-            verbose=results.args.verbose
+            verbose=results.args.verbose,
+            logger=logger,
         )
         results.best_vascular_mask_path[step] = best_vascular_mask_path
 
