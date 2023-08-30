@@ -51,8 +51,14 @@ def get_tsv_data(
         picnic_midtimes = list(subject_dir.glob(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
-        old_school_times = [subject_dir / f"{subject_id}.raw.midtime.txt", ]
-        alternate_times = [subject_dir / "midtimes.txt", ]
+        old_school_times = [
+            subject_dir / f"{subject_id}.raw.midtime.txt",
+            subject_dir / "raw" / f"{subject_id}.raw.midtime.txt",
+        ]
+        alternate_times = [
+            subject_dir / "midtimes.txt",
+            subject_dir / "raw" / f"midtimes.txt",
+        ]
         possible_files = old_school_times + alternate_times + picnic_midtimes
     else:
         logger.error("I do not understand '{contents}' content.")
