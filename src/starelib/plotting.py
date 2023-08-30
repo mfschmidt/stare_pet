@@ -182,8 +182,8 @@ def prep_data(data):
 
     if isinstance(data, pd.DataFrame):
         return data
-    elif isinstance(data, list):
-        if len(data) > 0 and isinstance(data[0], TimeActivityCurve):
+    elif isinstance(data, list) and (len(data) > 0):
+        if isinstance(data[0], TimeActivityCurve):
             return tacs_to_plottable_dataframe(data)
     else:
         raise TypeError("prep_data can handle DataFrame objects or lists "
