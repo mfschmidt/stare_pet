@@ -11,9 +11,10 @@ class Results:
     """ A base class for storing results throughout a pipeline run.
     """
 
-    def __init__(self, name, parsed_args, dt_format="%Y-%m-%d_%I-%M"):
+    def __init__(self, name, title, parsed_args, dt_format="%Y-%m-%d_%I-%M"):
         self._dt_format = dt_format
         self._name = name
+        self._title = title
         self._args = parsed_args
         self._start_datetime = datetime.now()
         self._end_datetime = None
@@ -22,7 +23,7 @@ class Results:
         self.setup_logger()
 
         self.report = Report(
-            self._name,
+            self._title,
             parsed_args.output_path / f"{parsed_args.subject}_stare_report.html"
         )
 

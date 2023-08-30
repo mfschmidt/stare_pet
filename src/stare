@@ -33,6 +33,7 @@ def main(parsed_args):
         # We can read to it and write from it, and it keeps a log of
         # everything, so building a report at the end is easier.
         results = StareResults(
+            "STARE",
             f"STARE Results for {parsed_args.subject}",
             parsed_args
         )

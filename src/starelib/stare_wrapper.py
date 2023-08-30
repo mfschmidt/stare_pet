@@ -1,6 +1,5 @@
 import os
 import argparse
-import logging
 from pathlib import Path
 from multiprocessing import cpu_count
 
@@ -129,8 +128,7 @@ def validate_arguments(args):
         args.output_path = Path(args.output_path) / args.subject
     if not args.output_path.exists():
         args.output_path.mkdir(parents=True, exist_ok=True)
-        logging.info(f"Creating '{str(args.output_path)}', "
-                     "which did not exist.")
+        print(f"Creating '{str(args.output_path)}', which did not exist.")
     if not args.output_path.exists():
         msg = (f"The output_path '{str(args.output_path)}' "
                "does not exist and I cannot create it.")
