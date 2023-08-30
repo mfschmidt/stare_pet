@@ -4,6 +4,12 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.6.6, 2023-08-29
+
+- Aligned loggers so info and debug output should write out correctly.
+- Changed, then changed back, algorithm for selecting peak cluster
+  (highest of earliest peaks rather than most frequent earliest peak)
+
 Version 0.5.0, 2023-05-01
 
 - Implemented multiprocessing for bootstrapping parameters
