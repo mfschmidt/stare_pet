@@ -20,11 +20,19 @@ rng = np.random.default_rng()
 # Make a color palette matching Betsy's in matplotlib
 betsy_palette = {
     "cerfullcs_c": 'blue', "fit_cerfullcs_c": 'blue',
+    "cerfullc_c": 'blue', "fit_cerfullc_c": 'blue',
+    "cerebellum": 'blue', "fit_cerebellum": 'blue',
     "cin": 'red', "fit_cin": 'red',
+    "cingulate": 'red', "fit_cingulate": 'red',
     "hip": 'orange', "fit_hip": 'orange',
+    "hippocampus": 'orange', "fit_hippocampus": 'orange',
     "par": 'purple', "fit_par": 'purple',
+    "parietal": 'purple', "fit_parietal": 'purple',
     "pph": 'green', "fit_pph": 'green',
+    "med": 'green', "fit_med": 'green',
+    "prefrontal": 'green', "fit_prefrontal": 'green',
     "pip": 'cyan', "fit_pip": 'cyan',
+    "parahippocampal": 'cyan', "fit_parahippocampal": 'cyan',
 }
 
 
@@ -83,7 +91,7 @@ def tacs_to_plottable_dataframe(tacs):
 
 def plot_vascular_tacs(
         data, vascular_color='blue', highlight_color='red',
-        tall=False, ax=None
+        tall=False, large=False, ax=None
 ):
     """ Plot a time activity curve (TAC), in one panel
 
@@ -96,16 +104,19 @@ def plot_vascular_tacs(
         :param highlight_color: The color of highlight laid over the best of
                                 all vascular TACs
         :param tall: Shrink the legend and move it to the bottom
+        :param large: Give a bit more resolution and size for 16x9 aspect
         :param ax: Optionally draw on your own axes
         :returns Figure:
     """
 
     if tall:
         figsize=(6, 6)
+    elif large:
+        figsize=(16, 9)
     else:
         figsize=(10, 6)
     if ax is None:
-        fig, axes = plt.subplots(figsize=figsize)
+        fig, axes = plt.subplots(figsize=figsize, layout='tight')
     else:
         fig, axes = ax.get_figure(), ax
 
@@ -158,7 +169,6 @@ def plot_vascular_tacs(
         )
     fig.suptitle(f"Optimal vascular TACs: {data['k'].min()}-{data['k'].max()}"
                  " k-means clusters")
-    fig.tight_layout()
 
     return fig
 
@@ -274,20 +284,23 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
         combined_filter = [
             t and pvc for t, pvc in zip(t_filter, data['name'] == "pvc")
         ]
-        sns.scatterplot(data=data[combined_filter],
-                        x='t', y='activity', hue='name',
-                        palette=palette, alpha=0.5, s=25,
-                        legend=False, ax=ax)
+        if np.sum(combined_filter) > 0:
+            sns.scatterplot(
+                data=data[combined_filter], x='t', y='activity',
+                hue='name', palette=palette, alpha=0.5, s=25,
+                legend=False, ax=ax
+            )
 
         # Next, plot the centroids that are the best for their k-means group
         combined_filter = [t and c for t, c in zip(t_filter, c_filter)]
-        sns.lineplot(data=data[combined_filter],
-                     x="t", y="activity",
-                     hue='name', palette=palette,
-                     style='name' if dashes is not None else None,
-                     dashes=dashes,
-                     alpha=0.5, linewidth=3,
-                     legend=do_legend, estimator=None, ax=ax)
+        if np.sum(combined_filter) > 0:
+            sns.lineplot(
+                data=data[combined_filter], x="t", y="activity",
+                hue='name', palette=palette,
+                style='name' if dashes is not None else None,
+                dashes=dashes, alpha=0.5, linewidth=3,
+                legend=do_legend, estimator=None, ax=ax
+            )
 
         # Finally, plot the very best centroid of the whole batch.
         # best_k = data[data['best_overall'] & t_filter]['k'].unique()[0]
@@ -445,6 +458,24 @@ def plot_bootstrap_constant(
     return fig
 
 
+def winsorize_curves(curves, sds=2):
+    """ Remove outliers and return subset of curves. """
+
+    # curves is a 'length of a curve (551)' x 'number of curves (500)' dataframe
+    curve_means = np.mean(np.array(curves), axis=1)
+    curve_stds = np.std(np.array(curves), axis=1)
+    curve_mins = curve_means - (sds * curve_stds)
+    curve_maxs = curve_means + (sds * curve_stds)
+    pruned_curves = [
+        curves[i] for i in range(curves.shape[1])
+        if np.sum(
+            [((_ < curve_mins[j]) or (_ > curve_maxs[j]))
+             for j, _ in enumerate(curves[i])]
+        ) == 0
+    ]
+    return pd.DataFrame(pruned_curves).T
+
+
 def plot_bootstrap_curves(
         curves, time_tac, vasc_tac, subject, skip_outliers=False
 ):
@@ -580,7 +611,7 @@ def plot_regional_densities(
         comp_prefix = "matlab"
 
     fig, axes = plt.subplots(
-        nrows=2, ncols=3, sharex=True, sharey=True, figsize=(15, 11)
+        nrows=2, ncols=3, sharex='all', sharey='all', figsize=(15, 11)
     )
 
     i = 0
@@ -682,15 +713,22 @@ def plot_tac_with_sd_lines(
 
 def plot_many_curves(primary_curves, primary_tac,
                      secondary_curves, secondary_tac,
-                     subject_name):
+                     subject_name, skip_outliers=False):
     """ """
+
+    if skip_outliers:
+        _primary_curves = winsorize_curves(primary_curves)
+        _secondary_curves = winsorize_curves(secondary_curves)
+    else:
+        _primary_curves = primary_curves
+        _secondary_curves = secondary_curves
 
     # Label primary and secondary dataframes, then concatenate them into one.
     ml_boot_curve_df_long = prep_curve_df(
-        secondary_curves, secondary_tac, 'ml', 'matlab',
+        _secondary_curves, secondary_tac, 'ml', 'matlab',
     )
     py_boot_curve_df_long = prep_curve_df(
-        primary_curves, primary_tac, 'py', 'python',
+        _primary_curves, primary_tac, 'py', 'python',
     )
     all_boot_curves = pd.concat(
         [ml_boot_curve_df_long, py_boot_curve_df_long, ]
@@ -758,8 +796,10 @@ def plot_many_curves(primary_curves, primary_tac,
 
     fig_bootstraps.suptitle(
         f"{subject_name}'s "
-        f"{primary_curves.shape[1]} {primary_tac.source} and "
-        f"{secondary_curves.shape[1]} {secondary_tac.source} "
+        f"{_primary_curves.shape[1]}/{primary_curves.shape[1]} "
+        f"{primary_tac.source} and "
+        f"{_secondary_curves.shape[1]}/{secondary_curves.shape[1]} "
+        f"{secondary_tac.source} "
         f"curves"
     )
 
@@ -953,5 +993,59 @@ def plot_all_stare_tac_fits(
     )
     fig.suptitle(title)
     fig.tight_layout()
+
+    return fig
+
+
+def plot_ks(py_data, ml_data, title="Parameter distributions", figsize=(16, 8)):
+    """ Plot k values """
+
+    params = sorted(set(py_data['k']).union(ml_data['k']))
+    fig, axes = plt.subplots(
+        ncols=len(params), figsize=figsize, layout="tight"
+    )
+    fig.suptitle(title)
+
+    # Save and re-use axes legend components
+    ax_handles, ax_labels = [], []
+
+    # For summarizing python data,
+    py_sum_data = py_data.groupby(["tgt", "k"])['value'].mean().reset_index()
+
+    for i, k in enumerate(params):
+        panel = axes[i]
+        panel.set_title(k)
+        sns.stripplot(
+            data=ml_data[ml_data['k'] == k], x='tgt', y='value',
+            color='black', marker="D", s=10, alpha=0.5, label="matlab",
+            ax=panel
+        )
+        sns.stripplot(
+            data=py_sum_data[py_sum_data['k'] == k], x='tgt', y='value',
+            c='gray', marker="o", s=10, alpha=0.5, label="python",
+            ax=panel
+        )
+        sns.stripplot(
+            data=py_data[py_data['k'] == k], x='tgt', y='value',
+            hue='src', palette=betsy_palette, s=5, ax=panel
+        )
+        # Do not plot legends on axes. Create a new legend in the spare column
+        handles, labels = panel.get_legend_handles_labels()
+        ax_handles += handles
+        ax_labels += labels
+        panel.get_legend().remove()
+
+    # Prune the long list of multiple legend items
+    # and create a new legend, in order of regions
+    final_legend_handles, final_legend_labels = [], []
+    for i, label in enumerate(ax_labels):
+        if label not in final_legend_labels:
+            final_legend_handles.append(ax_handles[i])
+            final_legend_labels.append(ax_labels[i])
+    fig.legend(
+        final_legend_handles, final_legend_labels,
+        ncol=len(final_legend_labels),
+        bbox_to_anchor=(0.5, 0.0), loc="upper center", borderaxespad=0
+    )
 
     return fig
