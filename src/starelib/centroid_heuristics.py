@@ -58,7 +58,10 @@ def likely_peripheral(c):
     return len(c.activity) > 0
 
 
-def find_centroids(data, ks, features, mid_times=None, num_cpus=-1, verbose=0):
+def find_centroids(
+        data, ks, features,
+        mid_times=None, num_cpus=-1, verbose=0, logger=None,
+):
     """ Step 1. From all PET data, find a vascular cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -71,11 +74,12 @@ def find_centroids(data, ks, features, mid_times=None, num_cpus=-1, verbose=0):
         :param iterable mid_times: will be stored alongside activity in TACs
         :param num_cpus: How many CPUs to deploy on multiprocessing
         :param int verbose: Set non-zero to increase logging, higher is more
+        :param logging.logger logger: output comments here if available
 
         :returns tuple: The best TAC, and all the TACs
     """
 
-    logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # Do k-means clustering of timeseries for many values of k
     # from Matlab vascClust.m:112:158
@@ -138,7 +142,10 @@ def find_centroids(data, ks, features, mid_times=None, num_cpus=-1, verbose=0):
     return all_centroids, k_means_fits
 
 
-def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
+def find_vascular_centroids(
+        data, ks,
+        mid_times=None, num_cpus=-1, verbose=0, logger=None,
+):
     """ Step 1. From all PET data, find a vascular cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -150,11 +157,12 @@ def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
         :param iterable mid_times: will be stored alongside activity in TACs
         :param int num_cpus: how many processes to use on finding centroids
         :param int verbose: Set non-zero to increase logging, higher is more
+        :param logging.logger logger: output comments here if available
 
         :returns tuple: The best TAC, and all the TACs
     """
 
-    logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     vascular_features = {
         "likely_noise": likely_noise,
@@ -183,21 +191,37 @@ def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
         # Higher initial values are more indicative of arterial signal,
         # which is preferable to venous or sinus
         if len(vascular_centroids) > 0:
+            # Do this two ways, find the earliest peak and the highest peak,
+            # then sort the earliest by height and the highest by onset.
             peak_idxs = np.array([c.peak_index for c in vascular_centroids])
+            peak_vals = np.array([c.peak_value for c in vascular_centroids])
             earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
+            highest_peak_idxs = np.where(peak_vals == np.max(peak_vals))[0]
             # Of the vascular centroids peaking at the same earliest time,
             # which is highest?
-            highest_early_peak_idx = earliest_peak_idxs[
-                np.argmax([vascular_centroids[i].peak_value
-                           for i in earliest_peak_idxs])
-            ]
+            highest_early_peak_idx = earliest_peak_idxs[np.argmax([
+                vascular_centroids[i].peak_value for i in earliest_peak_idxs
+            ])]
+            earliest_high_peak_idx = highest_peak_idxs[np.argmax([
+                vascular_centroids[i].peak_index for i in highest_peak_idxs
+            ])]
             # Label this centroid as best, at least for this value of k
+            # Try the highest rather than the earliest (v0.65+) because
+            # outliers should be dropped in the final frequency test.
             vascular_centroids[highest_early_peak_idx].best_in_k = True
+            # vascular_centroids[earliest_high_peak_idx].best_in_k = True
             logger.debug(
-                "  Best centroid [{}] has peak of {:0.3f} at t idx {}".format(
+                "  Early centroid [{}] has peak of {:0.3f} at t idx {}".format(
                     vascular_centroids[highest_early_peak_idx].label,
                     vascular_centroids[highest_early_peak_idx].peak_value,
                     vascular_centroids[highest_early_peak_idx].peak_index,
+                )
+            )
+            logger.debug(
+                "  High centroid [{}] has peak of {:0.3f} at t idx {}".format(
+                    vascular_centroids[earliest_high_peak_idx].label,
+                    vascular_centroids[earliest_high_peak_idx].peak_value,
+                    vascular_centroids[earliest_high_peak_idx].peak_index,
                 )
             )
 
@@ -213,6 +237,26 @@ def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
         [c.peak_index for c in best_in_k_centroids], return_counts=True
     )
     # Which time point is most likely to have the highest value?
+    """
+    # This is an alternative way to select the best centroid from among those
+    # NOT selected as the best in their individual k pool.
+    vascular_peaks = [
+        (c.k, np.argmax(c.activity), np.max(c.activity))
+        for c in all_centroids
+        if c.features["likely_vascular"]
+    ]
+    values_per_peak = [
+        (idx, np.mean([vp[2] for vp in vascular_peaks if vp[1] == idx]))
+        for idx in np.unique([vp[1] for vp in vascular_peaks])
+    ]
+    best_centroid_idx = values_per_peak[
+        np.argmax([vp[1] for vp in values_per_peak])
+    ][0]
+    centroids_with_best_idx = [
+        c for c in all_centroids
+        if (c.peak_index == best_centroid_idx)
+    ]
+    """
     best_centroid_idx = top_indices[np.argmax(top_frequencies)]
 
     # Make a list of best-in-k centroids that peak at the same,
@@ -236,7 +280,10 @@ def find_vascular_centroids(data, ks, mid_times=None, num_cpus=-1, verbose=0):
     return all_centroids, k_means_fits
 
 
-def find_peripheral_centroids(data, ks, num_cpus=-1, mid_times=None, verbose=0):
+def find_peripheral_centroids(
+        data, ks,
+        num_cpus=-1, mid_times=None, verbose=0, logger=None,
+):
     """ Step 1. From all PET data, find a peripheral cluster.
 
         Loop over all values for k in ks, looking for clusters that
@@ -248,11 +295,12 @@ def find_peripheral_centroids(data, ks, num_cpus=-1, mid_times=None, verbose=0):
         :param int num_cpus: How many processes to use finding centroids
         :param iterable mid_times: will be stored alongside activity in TACs
         :param int verbose: Set non-zero to increase logging, higher is more
+        :param logging.logger logger: output comments here if available
 
         :returns tuple: The best TAC, and all the TACs
     """
 
-    logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     vascular_features = {
         "likely_noise": likely_noise,
