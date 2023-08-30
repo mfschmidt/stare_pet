@@ -14,7 +14,10 @@ from .util import Image, image_in_millicuries,\
     combine_volumes_into_4d, explode_4d_into_volumes
 
 
-def get_tsv_data(input_path, subject_id, contents, tracer, logger=None):
+def get_tsv_data(
+        input_path, subject_id, contents, tracer,
+        logger=None
+):
     """ Find a tsv/txt file and read its data
 
     :param input_path: path to find subjects
@@ -25,8 +28,7 @@ def get_tsv_data(input_path, subject_id, contents, tracer, logger=None):
     :return pandas.DataFrame: data
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # Set context for different types of data. These are the defaults.
     header = 0
@@ -146,8 +148,7 @@ def get_plasma(input_path, subject_id, tracer, logger=None):
     :return pandas.DataFrame: A Centroid containing plasma activity
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     plasma_data, plasma_file = get_tsv_data(
         input_path, subject_id, "plasma", tracer, logger
@@ -212,7 +213,8 @@ def get_mid_times(results):
 
 
 def get_individual_volumes(
-        input_path, output_path, subject_id, frames_to_ignore, logger=None
+        input_path, output_path, subject_id, frames_to_ignore,
+        logger=None
 ):
     """ Find images, a volume for each mid-time
 
@@ -225,8 +227,7 @@ def get_individual_volumes(
     :return dict: key-value dict with image data
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     volumes = []
     image_dir = Path(input_path) / subject_id / "moco"
@@ -246,86 +247,75 @@ def get_individual_volumes(
 
             # Store the image if it is not to be ignored.
             if i + 1 in frames_to_ignore:
-                logger.warning(f"Frame {i + 1} exists, but is being ignored.")
+                logger.warning(f"Frame {i + 1} exists, and will be ignored.")
+                img = nib.load(img_file)
             else:
                 logger.info(f"Reading volume '{img_file}' as frame {i + 1:02d}")
                 img = nib.load(img_file)
-                logger.debug(f"  frame {i + 1} is shaped "
-                             f"{'n/a' if img is None else img.shape}")
-                # No matter the original image format, we will save our own
-                # copy of each image as a Nifti1 nii.gz for consistency
-                # throughout the pipeline.
-                nifti_img = nib.Nifti1Image(img.get_fdata(), img.affine)
-                nifti_file = orig_dir / f"{subject_id}_orig_{i + 1:02d}.nii.gz"
-                nib.save(nifti_img, str(nifti_file))
-                volumes.append(Image(
-                    path=nifti_file.parent,
-                    filename=nifti_file.name,
-                    prefix="orig",
-                    frame=i + 1,
-                    nifti=nifti_img,
-                ))
+            logger.debug(f"  frame {i + 1} is shaped "
+                         f"{'n/a' if img is None else img.shape}")
+            # No matter the original image format, we will save our own
+            # copy of each image as a Nifti1 nii.gz for consistency
+            # throughout the pipeline.
+            if len(img.get_fdata().shape) > 3:
+                nifti_img = nib.Nifti1Image(
+                    img.get_fdata()[:, :, :, -1], img.affine
+                )
+            else:
+                nifti_img = nib.Nifti1Image(
+                    img.get_fdata(), img.affine
+                )
+            nifti_img.header.set_xyzt_units("mm", "sec")
+            nifti_file = orig_dir / f"{subject_id}_orig_{i + 1:02d}.nii.gz"
+            nib.save(nifti_img, str(nifti_file))
+            volumes.append(Image(
+                path=nifti_file.parent,
+                filename=nifti_file.name,
+                prefix="orig",
+                frame=i + 1,
+                nifti=nifti_img,
+                usable=((i + 1) not in frames_to_ignore),
+            ))
+
+    # Return all the volumes, including any skipped one(s)
     return volumes
 
 
 def get_4D_data(
-        img_file, output_path, subject_id, frames_to_ignore,
-        section, cached=False, logger=None
+        img_file, output_path, subject_id, section,
+        ignored_volumes=None, logger=None
 ):
     """ Find images, a volume for each mid-time
 
     :param img_file: path to a 4D image file
     :param output_path: path to rewrite subjects
     :param subject_id: name of subject folder
-    :param frames_to_ignore: list of frame numbers to avoid
     :param section: report section for adding lines to the report
-    :param bool cached: True if from a cached image missing ignored volumes
+    :param list ignored_volumes: a list of volumes to pass over and not save
     :param logger: where to send messages
 
     :return dict: key-value dict with image data
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # There's one 4D image to load and break up.
     logger.info(f"Reading 4d image '{img_file}'")
     combined_image = nib.load(img_file)
     original_shape = combined_image.shape
     logger.debug(f"  image contains {original_shape[3]} volumes.")
-    if cached:
-        # We must assume the volume has skipped any 'frames-to-ignore' already
-        extra_sentence = "Assumed volumes [{}] not present in cached 4D".format(
-            ", ".join([str(_) for _ in frames_to_ignore])
-        )
-    else:
-        extra_sentence = "No volumes were ignored."
-        if len(frames_to_ignore) > 0:
-            chunks = []
-            begin = 0
-            for skipped in frames_to_ignore:
-                end = skipped - 1
-                chunks.append(combined_image.slicer[:, :, :, begin:end])
-                begin = skipped
-            chunks.append(combined_image.slicer[:, :, :, begin:])
-            combined_image = nib.concat_images(chunks, axis=3)
-            logger.debug(f"  image now contains {combined_image.shape[3]} volumes.")
-            extra_sentence = (f"After removing {len(frames_to_ignore)} volumes, "
-                              f"it contains {combined_image.shape[3]}.")
 
     # Split the 4d data out into separate volumes.
     volumes = explode_4d_into_volumes(
         combined_image, output_path / "orig",
         name_template=subject_id + "_orig_{:02d}.nii.gz",
-        ignored_volumes=frames_to_ignore,
-        cached=cached,
+        ignored_volumes=[] if ignored_volumes is None else ignored_volumes,
         logger=logger
     )
 
     section.add_line(f"Loaded PET data from <code>'{img_file}'</code>. "
                      f"It contained {original_shape[3]} volumes, "
-                     f"each shaped {combined_image.shape[0:3]}. "
-                     + extra_sentence)
+                     f"each shaped {combined_image.shape[0:3]}. ")
 
     return combined_image, volumes
 
@@ -414,12 +404,12 @@ def gather_data(results):
     combined_image, volumes = None, None
 
     # The first preference is if there is already a cached 4D image.
-    cached_img_file = args.output_path / f"{args.subject}_orig.nii.gz"
+    cached_img_file = args.output_path / f"{args.subject}_orig_4d.nii.gz"
     if combined_image is None and cached_img_file.exists():
         # If the image was cached, it was cached without the ignored frames
         combined_image, volumes = get_4D_data(
-            cached_img_file, args.output_path, args.subject,
-            args.ignore_frames, rpt_sect, cached=True, logger=logger
+            cached_img_file, args.output_path, args.subject, rpt_sect,
+            ignored_volumes=args.ignore_frames, logger=logger
         )
 
     # The next preference is a 4D image from the PICNIC pipeline.
@@ -431,8 +421,8 @@ def gather_data(results):
         picnic_img_file = img
     if combined_image is None and picnic_img_file.exists():
         combined_image, volumes = get_4D_data(
-            picnic_img_file, args.output_path, args.subject,
-            args.ignore_frames, rpt_sect, logger=logger
+            picnic_img_file, args.output_path, args.subject, rpt_sect,
+            ignored_volumes=args.ignore_frames, logger=logger
         )
 
     # Older FDG data are saved as one Analyze volume per time point.
@@ -452,7 +442,7 @@ def gather_data(results):
         )
         # Collect all the 3d image data into a single 4d structure.
         combined_image = combine_volumes_into_4d(
-            volumes, args.output_path / f"{args.subject}_orig.nii.gz",
+            volumes, args.output_path / f"{args.subject}_orig_4d.nii.gz",
             logger=logger
         )
         rpt_sect.add_line(f"Loaded PET data from {len(moco_images)} moco files."
@@ -460,8 +450,8 @@ def gather_data(results):
                           f"each shaped {combined_image.shape[0:3]}.")
     elif combined_image is None and len(moco_images) == 1:
         combined_image, volumes = get_4D_data(
-            picnic_img_file, args.output_path, args.subject,
-            args.ignore_frames, rpt_sect, logger=logger
+            picnic_img_file, args.output_path, args.subject, rpt_sect,
+            ignored_volumes=args.ignore_frames, logger=logger
         )
 
     if volumes is None:
@@ -472,13 +462,36 @@ def gather_data(results):
                      "See previous errors above to determine what's missing.")
         sys.exit(1)  # No point continuing on
 
+    # Preserve original image before removing slices and cropping.
+    mean_image = nib.nifti1.Nifti1Image(
+        np.mean(combined_image.get_fdata(), axis=3),
+        affine=combined_image.affine,
+    )
+    mean_image.header.set_xyzt_units("mm", "sec")
+    nib.save(mean_image,
+             args.output_path / f"{args.subject}_orig_mean.nii.gz")
+
+    # Handle ignored frames, keeping both an original and a modified
+    if len(args.ignore_frames) > 0:
+        chunks = []
+        begin = 0
+        for skipped in args.ignore_frames:
+            end = skipped - 1
+            chunks.append(combined_image.slicer[:, :, :, begin:end])
+            begin = skipped
+        chunks.append(combined_image.slicer[:, :, :, begin:])
+        cropped_image = nib.concat_images(chunks, axis=3)
+        logger.debug(f"  image now contains {cropped_image.shape[3]} volumes.")
+    else:
+        cropped_image = combined_image
+
     # Handle any requested axial clipping.
     # if axial_slices_to_clip == zero, this will not affect the image.
     # The header is updated along with the data.
-    cropped_image = combined_image.slicer[:, :, args.axial_slices_to_clip:, :]
+    cropped_image = cropped_image.slicer[:, :, args.axial_slices_to_clip:, :]
     nib.save(cropped_image,
-             args.output_path / f"{args.subject}_orig_cropped.nii.gz")
-    logger.debug(f"WROTE {args.subject}_orig_cropped.nii.gz "
+             args.output_path / f"{args.subject}_cropped_4d.nii.gz")
+    logger.debug(f"WROTE {args.subject}_cropped_4d.nii.gz "
                  f"({cropped_image.shape}) to {str(args.output_path)}")
     rpt_sect.add_line(f"Cropped {args.axial_slices_to_clip} slices from "
                       "the inferior of each PET volume taking them to "
@@ -488,6 +501,13 @@ def gather_data(results):
 
     # PET data should be in units of 'mCi'
     mci_image = image_in_millicuries(cropped_image, args.pet_units)
+    mean_mci_image = nib.nifti1.Nifti1Image(
+        np.mean(mci_image.get_fdata(), axis=3),
+        affine=mci_image.affine,
+    )
+    mean_mci_image.header.set_xyzt_units("mm", "sec")
+    nib.save(mean_mci_image,
+             args.output_path / f"{args.subject}_cropped_mean.nii.gz")
 
     # Store the relevant data to results object.
     results.input_4D = combined_image
