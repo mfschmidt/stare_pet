@@ -12,7 +12,8 @@ import pickle
 
 
 # Store each image as a namedtuple with more data
-Image = namedtuple('Image', 'path filename prefix frame nifti')
+Image = namedtuple('Image',
+                   'path filename prefix frame nifti usable')
 
 
 def flatten_4d_to_2d(a4d, zxy=True):
@@ -118,22 +119,20 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
 
 
 def explode_4d_into_volumes(
-        image, out_path, name_template, ignored_volumes=None,
-        cached=False, logger=None
+        image, out_path, name_template,
+        ignored_volumes=None, logger=None
 ):
     """ Save individual 3d volumes from 4d image.
 
     :param image: 4d nifti image
     :param out_path: path to save separate volumes
     :param name_template: format string for naming volume files
-    :param list ignored_volumes: a list of volumes to pass over and not save
-    :param bool cached: True if loading a cached 4D image, missing volumes
+    :param list ignored_volumes: a list of volumes to pass over and not use
     :param logger: logger object for writing information
     :return: list of individual volumes
     """
 
-    if ignored_volumes is None:
-        ignored_volumes = []
+    ignored_volumes = [] if ignored_volumes is None else ignored_volumes
     volumes = []
     write_volumes = True
     nifti_vols = [image.slicer[:, :, :, t] for t in range(image.shape[3])]
@@ -144,21 +143,14 @@ def explode_4d_into_volumes(
             logger.info(f"found {len(existing_images)} volumes in {out_path}, "
                         "not overwriting.")
     # Whether we write or not, still split and keep in memory.
-    ignored_volume_spacer = 0
     for i, nifti_vol in enumerate(nifti_vols):
-        if i + 1 in ignored_volumes:
-            if cached:
-                # skip a volume number, it wasn't in the 4D image anyway
-                ignored_volume_spacer += 1
-            else:
-                # pass over the volume, it is in the 4D image, but not usable
-                continue
         image = Image(
             path=out_path,
-            filename=name_template.format(i + 1 + ignored_volume_spacer),
+            filename=name_template.format(i + 1),
             prefix="orig",
-            frame=i + 1 + ignored_volume_spacer,
+            frame=i + 1,
             nifti=nifti_vol,
+            usable=((i + 1) not in ignored_volumes),
         )
         if write_volumes:
             image.path.mkdir(parents=True, exist_ok=True)
