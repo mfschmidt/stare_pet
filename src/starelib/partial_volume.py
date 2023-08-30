@@ -61,11 +61,12 @@ def correct_partial_volumes(results):
             prefix="pvc",
             frame=img.frame,
             nifti=nib.load(str(pvc_path)),
+            usable=img.usable,
         ))
 
     # Collect all the 3d image data into a single 4d structure.
     combined_image = combine_volumes_into_4d(
-        pvc_images,
+        [img for img in pvc_images if img.usable],
         results.args.output_path / f"sub-{results.args.subject}_pvc.nii.gz",
         logger=logger
     )
@@ -85,10 +86,12 @@ def correct_partial_volumes(results):
     reshaped_vascular_mask_data = flatten_4d_to_2d(
         np.reshape(
             vascular_mask_data,
-            (vascular_mask_data.shape[0],
-             vascular_mask_data.shape[1],
-             vascular_mask_data.shape[2],
-             1)
+            (
+                vascular_mask_data.shape[0],
+                vascular_mask_data.shape[1],
+                vascular_mask_data.shape[2],
+                1,
+            )
         )
     )
 
