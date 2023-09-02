@@ -25,7 +25,7 @@ def make_atlas_and_mask(
         this version of stare_pet, each mask may or may not overlay
         the original PET image correctly.
 
-    :param Centroid centroid: A dict containing centroid data and metadata
+    :param Centroid centroid: A Centroid object with label data
     :param Nifti1Image template_img: Image to use as a template for mask data
     :param int pad_inferior: Add this number of axial slices to the inferior
                              edge of the volume, for reversing the crop
@@ -36,8 +36,7 @@ def make_atlas_and_mask(
     :return: paths to atlas image and mask image
     """
 
-    if logger is None:
-        logger = logging.getLogger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # Shape the voxel labels into a 3d matrix to match the template image.
     cluster_atlas_data = reshape_labels_to_3d(
@@ -64,7 +63,7 @@ def make_atlas_and_mask(
     )
     cluster_atlas_img.update_header()
     cluster_mask_img = nib.Nifti1Image(
-        (cluster_atlas_data == centroid.label).astype(int),
+        np.array(cluster_atlas_data == centroid.label).astype(int),
         affine=template_img.affine, header=template_img.header
     )
     cluster_mask_img.update_header()
@@ -123,8 +122,7 @@ def save_centroid_masks(centroids, mask_output_path,
         :return nibabel.Nifti1Image: the best atlas image, in original space
     """
 
-    if logger is None:
-        logger = logging.get_logger("STARE")
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     best_mask_path = None
     for centroid in centroids:
@@ -260,13 +258,20 @@ def two_step_cluster(results):
 
     # Plot the top centroids over PET data, and add it to the report.
     pet_avg_img = image.mean_img(results.cropped_4D)
-    best_atlases, best_masks = {}, {}
+    best_atlases, best_masks, best_cs = {}, {}, {}
     for step in [1, 2]:
+        best_cs[step] = best_of(results.cluster_centroids[step])
         best_atlases[step], best_masks[step] = make_atlas_and_mask(
-            best_of(results.cluster_centroids[step]), pet_avg_img
+            best_cs[step], pet_avg_img
         )
+
     top_centroid_fig = plot_top_centroids_atlas(
         best_masks[1], best_masks[2], pet_avg_img,
+        title="\n".join([
+            f"{results.args.subject}:",
+            f"step 1. orange. {best_cs[1].label} of {best_cs[1].k}",
+            f"step 2. red. {best_cs[2].label} of {best_cs[2].k}",
+        ]),
     )
     filename = f"sub-{results.args.subject}_step-1-vascular_cluster_masks.png"
     top_centroid_fig.savefig(results.args.fig_path / filename)
@@ -289,6 +294,36 @@ def two_step_cluster(results):
         # )
         rpt_sect.add_link(results.args.fig_path / filename, text=caption)
 
+        # For debugging, plot all clusters for each k, to see best vs rest
+        if results.args.verbose > 1:
+            unique_ks = sorted(np.unique([
+                c.k for c in results.cluster_centroids[step]
+            ]))
+            for k in unique_ks:
+                cs_in_k = [c for c in results.cluster_centroids[step]
+                           if c.k == k]
+                fig_s_k = plot_vascular_tacs(
+                    cs_in_k, draw_non_vascular=True, tall=True
+                )
+                filename_s_k = filename.replace("_vas", f"_k-{k}_vas")
+                fig_s_k.savefig(results.args.debug_path / filename_s_k)
+
+            # For debugging, draw all masks on the average PET
+            for c in results.cluster_centroids[step]:
+                c_fig = plot_top_centroids_atlas(
+                    make_atlas_and_mask(c, pet_avg_img)[1],
+                    None,
+                    pet_avg_img,
+                    title="\n".join([
+                        f"{results.args.subject}:",
+                        f"step 1. orange. {c.label} of {c.k}, "
+                        f"peak {c.peak_value:0.2f} @ t # {c.peak_index}",
+                    ]),
+                )
+                filename = (f"sub-{results.args.subject}_step-1-k-{c.k}_"
+                            f"label-{c.label}_vascular_cluster_mask.png")
+                c_fig.savefig(results.args.debug_path / filename)
+
         # These data can be used to build custom plots or otherwise explore.
         filename = f"sub-{results.args.subject}_step-1-{step}_kmeans_tac.csv"
         tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
@@ -304,6 +339,7 @@ def two_step_cluster(results):
                 best_of(results.cluster_centroids[step]), f
             )
 
+        # Save out nifti masks (which ones conditional on verbosity)
         best_vascular_mask_path = save_centroid_masks(
             results.cluster_centroids[step],
             results.args.output_path / "masks",
