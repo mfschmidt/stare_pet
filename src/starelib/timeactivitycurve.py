@@ -17,7 +17,12 @@ class TimeActivityCurve:
 
         # Specified properties
         self.activity = np.asarray(activity)  # ndarray shaped ~ (25,)
-        self.timepoints = np.asarray(timepoints)  # ndarray shaped ~ (1000000,)
+        # At least one set of FDG timepoints has noise beyond the 4th decimal
+        # point that causes an extra timepoint to be added to the hi-res TAC.
+        # Rounding to the nearest millisecond prevents this problem.
+        self.timepoints = np.asarray([
+            round(t, 3) for t in timepoints
+        ])  # ndarray shaped ~ (1000000,)
         self.sd = None if sd is None else np.asarray(sd)  # ndarray ~ (25,)
         self.source = source  # where did this centroid come from
         self.name = name  # what I should call this TAC in a figure legend
@@ -123,3 +128,87 @@ class TimeActivityCurve:
 
     def post_peak_sigmas(self, method='sqrt'):
         return self.sigmas(method=method)[self.peak_index:]
+
+    def get_uniform_time_curve(self, spacing=0.10, interpolation='linear'):
+        """ Evenly space timepoints from uneven sampling
+
+            Betsy's matlab version only stored a peak_index value
+            in the fit vascular tac, not the pvc-corrected vascular tac. So we
+            needed two tacs to piece together a higher resolution interpolation.
+            Because we use a TimeActivityCurve object where every TAC has both
+            activity and timepoints and the ability to calculate its own peak,
+            only one TAC is necessary here.
+
+            # TODO: This needs to match results.fitted_hires_tac (551),
+            #       but not necessarily its own timing calculations.
+            #       from last timepoint of 55.00028 rather than 55.00000,
+            #       we fuck this up.
+        """
+
+        # Interpolate a higher-resolution x-axis time data from TAC data
+        # In matlab test, results in a 551-length vector from 0.0 to 55.0
+        # from 11 pre-peak 0.0 to 1.0 and 540 post-peak 1.1 to 55.0
+        pre_peak_time_uniform = np.arange(
+            start=0.0,
+            stop=round(self.post_peak_timepoints()[0], 1),
+            step=spacing,
+        )
+        post_peak_time_uniform = np.arange(
+            start=round(self.post_peak_timepoints()[0], 1),
+            stop=self.timepoints[-1] + spacing,
+            step=spacing,
+        )
+        complete_time_uniform = np.concatenate([
+            pre_peak_time_uniform, post_peak_time_uniform,
+        ])
+
+        # Interpolate higher-resolution y-axis activity from TAC data
+        # Interpolate values from sparse to hi-res, then clip low end to 0.0.
+        # DIFF:
+        #   Numpy's interpolator flattens at the end; matlab's shoots higher.
+        # NOTE:
+        #   pvc_mean_tac is the best estimate of pre-peak activity so far.
+        #   vascular_tac has been interpolated to high-res and back.
+        #   xp & fp must have same # of samples, so align both to time_curve.
+        if interpolation == 'linear':
+            pre_peak_vasctac_uniform = np.interp(
+                pre_peak_time_uniform,
+                self.pre_peak_timepoints(),
+                self.activity[:self.peak_index],
+            )
+        else:
+            pre_peak_vasctac_uniform = np.interp(
+                pre_peak_time_uniform,
+                self.pre_peak_timepoints(),
+                self.activity[:self.peak_index],
+            )
+        # Clean up any errant points
+        pre_peak_vasctac_uniform[(
+            (pre_peak_vasctac_uniform < 0) | np.isnan(pre_peak_vasctac_uniform)
+        )] = 0.0
+        num_post_peak = len(complete_time_uniform) - len(pre_peak_vasctac_uniform)
+        # We model only the pre-peak data, leave post-peak for later
+        post_peak_vasctac_uniform = np.array([np.nan, ] * num_post_peak)
+        boot_curve_activity_uniform = np.concatenate([
+            pre_peak_vasctac_uniform, post_peak_vasctac_uniform,
+        ])
+
+        # Ensure the fit is uniformly sampled.
+        deltas = []
+        last_t = 0.0
+        for j, t in enumerate(complete_time_uniform):
+            if j > 0:
+                deltas.append(t - last_t)
+            last_t = t
+        if (np.max(np.array(deltas)) - np.min(np.array(deltas))) > 0.0000001:
+            raise ValueError(
+                "Impossibly, the predetermined times are non-uniform!"
+            )
+
+        return TimeActivityCurve(
+            activity=np.array(boot_curve_activity_uniform),
+            timepoints=np.array(complete_time_uniform),
+            source="uniform_interpolator",
+            name="uniform_time_only",
+        )
+

@@ -5,7 +5,6 @@ from scipy.optimize import least_squares
 from scipy.stats import gaussian_kde
 from datetime import datetime
 
-from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
 from .util import from_cache, to_cache
 from .fitting_models import decay_model, find_curve_fits, func2tc_model
@@ -38,74 +37,6 @@ class CurveGenerator:
         random_noise = 2.0 * (self.randomizer(len(self._mean)) - 0.5)
         scaled_deviation = random_noise * self._sd
         return self._mean + scaled_deviation
-
-
-def make_uniform_time_curve(pvc_mean_tac, spacing=0.10):
-    """ Evenly space timepoints from uneven sampling
-
-        Betsy's matlab version only stored a peak_index value
-        in the fit vascular tac, not the pvc-corrected vascular tac. So we
-        needed two tacs to piece together a higher resolution interpolation.
-        Because we use a TimeActivityCurve object where every TAC has both
-        activity and timepoints and the ability to calculate its own peak,
-        only one TAC is necessary here.
-    """
-
-    # Interpolate a higher-resolution x-axis time data from TAC data
-    # In matlab test, results in a 551-length vector from 0.0 to 55.0
-    # from 11 pre-peak 0.0 to 1.0 and 540 post-peak 1.1 to 55.0
-    pre_peak_time_uniform = np.arange(
-        start=0.0,
-        stop=round(pvc_mean_tac.post_peak_timepoints()[0], 1),
-        step=spacing,
-    )
-    post_peak_time_uniform = np.arange(
-        start=round(pvc_mean_tac.post_peak_timepoints()[0], 1),
-        stop=pvc_mean_tac.timepoints[-1] + spacing,
-        step=spacing,
-    )
-    boot_curve_time_uniform = np.concatenate([
-        pre_peak_time_uniform, post_peak_time_uniform,
-    ])
-
-    # Interpolate higher-resolution y-axis activity from TAC data
-    # Interpolate values from sparse to hi-res, then clip low end to 0.0.
-    # DIFF: Numpy's interpolator flattens at the end; matlab's shoots higher.
-    # NOTE: pvc_mean_tac is the best estimate of pre-peak activity so far.
-    #       vascular_tac has been interpolated to high-res and back.
-    #       xp & fp must have same # of samples, so align both to time_curve.
-    pre_peak_vasctac_uniform = np.interp(
-        pre_peak_time_uniform,
-        pvc_mean_tac.pre_peak_timepoints(),
-        pvc_mean_tac.activity[:pvc_mean_tac.peak_index],
-    )
-    # Clean up any errant points
-    pre_peak_vasctac_uniform[(
-        (pre_peak_vasctac_uniform < 0) | np.isnan(pre_peak_vasctac_uniform)
-    )] = 0.0
-    num_post_peak = len(boot_curve_time_uniform) - len(pre_peak_vasctac_uniform)
-    # We model only the pre-peak data, leave post-peak for later
-    post_peak_vasctac_uniform = np.array([np.nan, ] * num_post_peak)
-    boot_curve_activity_uniform = np.concatenate([
-        pre_peak_vasctac_uniform, post_peak_vasctac_uniform,
-    ])
-
-    # Ensure the fit is uniformly sampled.
-    deltas = []
-    last_t = 0.0
-    for j, t in enumerate(boot_curve_time_uniform):
-        if j > 0:
-            deltas.append(t - last_t)
-        last_t = t
-    if (np.max(np.array(deltas)) - np.min(np.array(deltas))) > 0.00001:
-        raise ValueError("Impossibly, the predetermined times are nonuniform!")
-
-    return TimeActivityCurve(
-        activity=np.array(boot_curve_activity_uniform),
-        timepoints=np.array(boot_curve_time_uniform),
-        source="uniform_interpolator",
-        name="uniform_time_only",
-    )
 
 
 def fit_curve_to_exponential(bootstrap_curve, vascular_tac, uniform_tac):
@@ -151,8 +82,11 @@ def fit_curves_mp(
 
     # Stretch fit_tac's timepoints out to be evenly spaced at 0.10 seconds.
     # This is just a template to fit upcoming curves onto.
-    uniform_tac = make_uniform_time_curve(
-        results.pvc_mean_vascular_tac, spacing=0.10
+    # NOTE: pvc_mean_tac is the best estimate of pre-peak activity so far.
+    #       vascular_tac has been interpolated to high-res and back.
+    #       xp & fp must have same # of samples, so align both to time_curve.
+    uniform_tac = results.pvc_mean_vascular_tac.get_uniform_time_curve(
+        spacing=0.10, interpolation='linear',
     )
 
     # Support random curve generation, on the fly, as many times as necessary,
@@ -444,8 +378,11 @@ def boot_anchor(results):
 
     # Stretch fit_tac's timepoints out to be evenly spaced at 0.10 seconds.
     # This is just a template to fit upcoming curves onto.
-    uniform_tac = make_uniform_time_curve(
-        results.pvc_mean_vascular_tac, spacing=0.10
+    # NOTE: pvc_mean_tac is the best estimate of pre-peak activity so far.
+    #       vascular_tac has been interpolated to high-res and back.
+    #       xp & fp must have same # of samples, so align both to time_curve.
+    uniform_tac = results.pvc_mean_vascular_tac.get_uniform_time_curve(
+        spacing=0.10, interpolation='linear',
     )
 
     # Attempt to fit each bootstrap curve to the stacked exponential decay model

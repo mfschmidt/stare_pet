@@ -48,46 +48,35 @@ def interpolate_full_tac(
     if best_fit is None:
         return None
 
-    peak_activity_index = np.argmax(actual_tac.activity)
-    post_peak_mid_times = actual_tac.timepoints[peak_activity_index:]
-
-    # Set up uniform sampling intervals, with 0.1min between samples.
-    post_peak_uniform_t = np.asarray([_ / 10.0 for _ in range(
-        int(10.0 * round(post_peak_mid_times[0], 1)),
-        int(10.0 * post_peak_mid_times[-1] + 1.0),
-    )])
-    pre_peak_uniform_t = np.asarray([_ / 10.0 for _ in range(
-        0,
-        int(10.0 * round(post_peak_mid_times[0], 1)),
-    )])
-    all_uniform_t = np.concatenate([pre_peak_uniform_t, post_peak_uniform_t, ])
+    # For debugging comparison:
+    hi_res_tac = actual_tac.get_uniform_time_curve()
 
     # Calculate uniform post-peak activity values via prior fit.
-    post_peak_uniform_fit = model(
-        post_peak_uniform_t, *best_fit['parameters']
+    post_peak_hi_res_fit = model(
+        hi_res_tac.post_peak_timepoints(), *best_fit['parameters']
     )
 
     # Interpolate uniform pre-peak activity values via prior fit.
+    # pre-peak activity must include one more time point to include the peak.
     linear_interpolator = interp1d(
-        actual_tac.timepoints[:peak_activity_index + 1],
-        actual_tac.activity[:peak_activity_index + 1],
+        actual_tac.timepoints[:actual_tac.peak_index + 1],
+        actual_tac.activity[:actual_tac.peak_index + 1],
         fill_value='extrapolate',
     )
-    pre_peak_uniform_fit = linear_interpolator(pre_peak_uniform_t)
+    pre_peak_hi_res_fit = linear_interpolator(
+        hi_res_tac.timepoints[:hi_res_tac.peak_index + 1]
+    )
 
     # Concatenate pre- and post- peak into one full-length TAC
-    high_res_tac = TimeActivityCurve(
-        activity=np.concatenate([
-            pre_peak_uniform_fit, post_peak_uniform_fit,
-        ]),
-        timepoints=all_uniform_t,
-        source="interpolation",
-        name=tac_name,
-    )
+    hi_res_tac.activity = np.concatenate([
+        pre_peak_hi_res_fit[:-1], post_peak_hi_res_fit,
+    ])
+    hi_res_tac.source = "interpolation"
+    hi_res_tac.name = tac_name
 
     # Resample full high-res fit back down to original mid_times.
     pchip_interpolator = PchipInterpolator(
-        high_res_tac.timepoints, high_res_tac.activity,
+        hi_res_tac.timepoints, hi_res_tac.activity,
     )
 
     orig_res_tac = TimeActivityCurve(
@@ -98,7 +87,7 @@ def interpolate_full_tac(
         name="original res decay model",
     )
 
-    return orig_res_tac, high_res_tac
+    return orig_res_tac, hi_res_tac
 
 
 def html_equation_from_fit(fit):
