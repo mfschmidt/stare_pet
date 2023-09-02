@@ -4,11 +4,12 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
-Version 0.6.6, 2023-08-29
+Version 0.6.7, 2023-08-29
 
 - Aligned loggers so info and debug output should write out correctly.
 - Changed, then changed back, algorithm for selecting peak cluster
   (highest of earliest peaks rather than most frequent earliest peak)
+- Harmonized all hi-res TAC creation from one TimeActivityCurve method
 
 Version 0.5.0, 2023-05-01
 
