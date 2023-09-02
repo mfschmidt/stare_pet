@@ -29,6 +29,7 @@ betsy_palette = {
     "par": 'purple', "fit_par": 'purple',
     "parietal": 'purple', "fit_parietal": 'purple',
     "pph": 'green', "fit_pph": 'green',
+    "pfc": 'green', "fit_pfc": 'green',
     "med": 'green', "fit_med": 'green',
     "prefrontal": 'green', "fit_prefrontal": 'green',
     "pip": 'cyan', "fit_pip": 'cyan',
@@ -44,6 +45,7 @@ def palette_from_tac_regions(data):
     for region in data.columns:
         if region not in betsy_palette.keys():
             palette[region] = 'gray'
+            palette[f"fit_{region}"] = 'gray'
     palette.update(betsy_palette)
 
     return palette
@@ -91,7 +93,7 @@ def tacs_to_plottable_dataframe(tacs):
 
 def plot_vascular_tacs(
         data, vascular_color='blue', highlight_color='red',
-        tall=False, large=False, ax=None
+        tall=False, large=False, draw_non_vascular=False, ax=None
 ):
     """ Plot a time activity curve (TAC), in one panel
 
@@ -105,16 +107,17 @@ def plot_vascular_tacs(
                                 all vascular TACs
         :param tall: Shrink the legend and move it to the bottom
         :param large: Give a bit more resolution and size for 16x9 aspect
+        :param draw_non_vascular: Draw even TACs that aren't considered
         :param ax: Optionally draw on your own axes
         :returns Figure:
     """
 
     if tall:
-        figsize=(6, 6)
+        figsize = (6, 6)
     elif large:
-        figsize=(16, 9)
+        figsize = (16, 9)
     else:
-        figsize=(10, 6)
+        figsize = (10, 6)
     if ax is None:
         fig, axes = plt.subplots(figsize=figsize, layout='tight')
     else:
@@ -132,29 +135,45 @@ def plot_vascular_tacs(
     num_vasc_lines = len(data[data['best_in_k']]['name'].unique())
     vascs = [vascular_color, ] * num_vasc_lines
 
+    # Plot every non-vascular centroid as light gray to provide context.
+    # These are plotted first to set them as background.
+    if draw_non_vascular and len(data[~data['likely_vascular']]) > 0:
+        sns.lineplot(
+            data=data[~data['likely_vascular']], x='t', y='activity',
+            color='gray', hue='name', alpha=0.5, linewidth=1,
+            linestyle=":", legend=False, ax=axes
+        )
+
     # Plot every vascular centroid as light gray to provide context.
     # These are plotted first to set them as background.
-    sns.lineplot(data=data[data['likely_vascular']], x='t', y='activity',
-                 hue='name', palette=grays, alpha=0.5, linewidth=1,
-                 legend=False, ax=axes)
+    if len(data[data['likely_vascular']]) > 0:
+        sns.lineplot(
+            data=data[data['likely_vascular']], x='t', y='activity',
+            hue='name', palette=grays, alpha=0.5, linewidth=1,
+            legend=False, ax=axes
+        )
 
     # Next, plot the centroids that are the best for their k-means group
-    sns.lineplot(
-        data=data[data['best_in_k']], x="t", y="activity",
-        hue='name', palette=vascs, alpha=0.5, linewidth=1,
-        ax=axes
-    )
+    if len(data[data['best_in_k']]) > 0:
+        sns.lineplot(
+            data=data[data['best_in_k']], x="t", y="activity",
+            hue='name', palette=vascs, alpha=0.5, linewidth=1,
+            ax=axes
+        )
     if tall:
         # clear all legend labels, allowing the next lineplot to make a new one.
         for line in axes.lines:
             line.set_label(s='')
 
     # Finally, plot the very best centroid of the whole batch.
-    best_k = data[data['best_overall']]['k'].unique()[0]
-    best_label = data[data['best_overall']]['label'].unique()[0]
-    sns.lineplot(data=data[data['best_overall']], x="t", y="activity",
-                 color=highlight_color, linestyle=":", linewidth=6, alpha=0.5,
-                 label=f"Best (k-{best_k:02d}-{best_label:02d})", ax=axes)
+    if len(data[data['best_overall']]) > 0:
+        best_k = data[data['best_overall']]['k'].unique()[0]
+        best_label = data[data['best_overall']]['label'].unique()[0]
+        sns.lineplot(
+            data=data[data['best_overall']], x="t", y="activity",
+            color=highlight_color, linestyle=":", linewidth=6, alpha=0.5,
+            label=f"Best (k-{best_k:02d}-{best_label:02d})", ax=axes
+        )
 
     # Finish off the details so the plot is readable.
     axes.set_xlabel("Minutes")  # ranges 0 to 60
@@ -191,21 +210,34 @@ def prep_data(data):
 
 
 def plot_top_centroids_atlas(
-        step_1_mask_img, step_2_mask_img, pet4d_img, figsize=(8, 4)
+        step_1_mask_img, step_2_mask_img, pet4d_img,
+        title="", figsize=(8, 4)
 ):
     """ Plot the PET average background and masks over the top.
 
     """
 
     mean_pet_img = image.mean_img(pet4d_img)
-    atlas_combo_img = nib.Nifti1Image(
-        step_1_mask_img.get_fdata() + step_2_mask_img.get_fdata(),
-        affine=mean_pet_img.affine, dtype=np.uint8,
-    )
+    # Step 2 is necessarily a subset of step 1, so we can just add the ones.
+    if step_2_mask_img is None:
+        atlas_combo_img = nib.Nifti1Image(
+            step_1_mask_img.get_fdata(),
+            affine=mean_pet_img.affine,
+            dtype=np.uint8,
+        )
+    else:
+        atlas_combo_img = nib.Nifti1Image(
+            step_1_mask_img.get_fdata() + step_2_mask_img.get_fdata(),
+            affine=mean_pet_img.affine, dtype=np.uint8,
+        )
     two_grade_cmap = ListedColormap(['orange', 'red', ])
-    fig, axes = plt.subplots(figsize=figsize)
-    plot_roi(roi_img=atlas_combo_img, bg_img=mean_pet_img,
-             cmap=two_grade_cmap, black_bg=False, axes=axes,)
+    fig = plt.figure(figsize=figsize)
+    axes = fig.add_axes([0, 0, 1, 1, ])
+    display = plot_roi(
+        roi_img=atlas_combo_img, bg_img=mean_pet_img,
+        cmap=two_grade_cmap, black_bg=False, axes=axes,
+    )
+    display.title(title, color='black', bgcolor='white')
 
     return fig
 
