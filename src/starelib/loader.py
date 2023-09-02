@@ -40,11 +40,13 @@ def get_tsv_data(
         picnic_tacs = list(subject_dir.glob(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
-        old_school_tacs = [subject_dir / f"{subject_id}.TACs", ]
+        old_school_tacs = [subject_dir / "raw" / f"{subject_id}.tacs.tsv",
+                           subject_dir / f"{subject_id}.TACs", ]
         alternate_tacs = [subject_dir / "tacs.txt", ]
         possible_files = picnic_tacs + old_school_tacs + alternate_tacs
     elif contents.lower() == "plasma":
-        old_school_plasma = [subject_dir / f"{subject_id}plasma.txt", ]
+        old_school_plasma = [subject_dir / "raw" / f"{subject_id}.plasma.tsv",
+                             subject_dir / f"{subject_id}plasma.txt", ]
         alternate_plasma = [subject_dir / "plasma.txt", ]
         possible_files = old_school_plasma + alternate_plasma
     elif contents.lower() in ["midtimes", "mid-times", "mid_times", ]:
@@ -52,8 +54,8 @@ def get_tsv_data(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
         old_school_times = [
-            subject_dir / f"{subject_id}.raw.midtime.txt",
             subject_dir / "raw" / f"{subject_id}.raw.midtime.txt",
+            subject_dir / f"{subject_id}.raw.midtime.txt",
         ]
         alternate_times = [
             subject_dir / "midtimes.txt",
