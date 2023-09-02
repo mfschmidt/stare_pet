@@ -138,11 +138,6 @@ class TimeActivityCurve:
             Because we use a TimeActivityCurve object where every TAC has both
             activity and timepoints and the ability to calculate its own peak,
             only one TAC is necessary here.
-
-            # TODO: This needs to match results.fitted_hires_tac (551),
-            #       but not necessarily its own timing calculations.
-            #       from last timepoint of 55.00028 rather than 55.00000,
-            #       we fuck this up.
         """
 
         # Interpolate a higher-resolution x-axis time data from TAC data
