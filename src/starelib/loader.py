@@ -42,7 +42,8 @@ def get_tsv_data(
         ))
         old_school_tacs = [subject_dir / "raw" / f"{subject_id}.tacs.tsv",
                            subject_dir / f"{subject_id}.TACs", ]
-        alternate_tacs = [subject_dir / "tacs.txt", ]
+        alternate_tacs = [subject_dir / "tacs.txt",
+                          subject_dir / "BS_Stats" / "coreg" / subject_id, ]
         possible_files = picnic_tacs + old_school_tacs + alternate_tacs
     elif contents.lower() == "plasma":
         old_school_plasma = [subject_dir / "raw" / f"{subject_id}.plasma.tsv",
