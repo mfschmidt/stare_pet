@@ -449,13 +449,16 @@ def gather_data(results):
             args.ignore_frames, logger=logger
         )
         # Collect all the 3d image data into a single 4d structure.
+        alerts = []
         combined_image = combine_volumes_into_4d(
             volumes, args.output_path / f"{args.subject}_orig_4d.nii.gz",
-            logger=logger
+            alerts=alerts, logger=logger
         )
         rpt_sect.add_line(f"Loaded PET data from {len(moco_images)} moco files."
                           f" They contained {combined_image.shape[3]} volumes, "
                           f"each shaped {combined_image.shape[0:3]}.")
+        for alert in alerts:
+            rpt_sect.add_line(alert, css_class='warning', log=True)
     elif combined_image is None and len(moco_images) == 1:
         combined_image, volumes = get_4D_data(
             picnic_img_file, args.output_path, args.subject, rpt_sect,

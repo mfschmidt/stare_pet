@@ -159,6 +159,7 @@ class Report:
             "  border: thin silver solid; margin: 0.5em; padding: 0.5em;",
             "}",
             ".subtext {color: black; font-size: small; font-style: italic; }",
+            ".warning {color: red; font-size: small; font-style: bold; }",
             ".equation {text-align: center; }",
             ".left_fig {float: left; width: 49%; }",
             ".right_fig {float: right; width: 49%; }",
