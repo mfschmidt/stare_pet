@@ -4,7 +4,7 @@ import nibabel as nib
 import numpy as np
 import pickle
 
-from .util import Image, combine_volumes_into_4d, flatten_4d_to_2d
+from .util import StareVolume, combine_volumes_into_4d, flatten_4d_to_2d
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import tacs_to_plottable_dataframe, plot_detailed_tacs
 
@@ -27,7 +27,7 @@ def correct_partial_volumes(results):
     fig_path.mkdir(parents=True, exist_ok=True)
 
     # Perform PVC on each of the original volumes provided
-    pvc_images = []
+    pvc_volumes = []
     pvc_exe = "/usr/local/bin/petpvc"
     for img in results.volume_images:
         pvc_filename = f"{results.args.subject}_pvc_{img.frame:02d}.nii.gz"
@@ -55,18 +55,19 @@ def correct_partial_volumes(results):
                 logger.error("ERROR: " + p.stderr.decode("utf-8"))
 
         # Maintain a list of pvc_images, analogous to list of orig_images
-        pvc_images.append(Image(
+        pvc_image = nib.Nifti1Image.from_filename(str(pvc_path))
+        pvc_volumes.append(StareVolume(
+            nifti=pvc_image,
             path=pvc_path.parent,
             filename=pvc_path.name,
             prefix="pvc",
             frame=img.frame,
-            nifti=nib.load(str(pvc_path)),
             usable=img.usable,
         ))
 
     # Collect all the 3d image data into a single 4d structure.
     combined_image = combine_volumes_into_4d(
-        [img for img in pvc_images if img.usable],
+        [vol for vol in pvc_volumes if vol.usable],
         results.args.output_path / f"sub-{results.args.subject}_pvc.nii.gz",
         logger=logger
     )
@@ -81,7 +82,9 @@ def correct_partial_volumes(results):
 
     reshaped_pvc_data = flatten_4d_to_2d(pet_4d_data)
 
-    vascular_mask_img = nib.load(results.best_vascular_mask_path[2])
+    vascular_mask_img = nib.Nifti1Image.from_filename(
+        results.best_vascular_mask_path[2]
+    )
     vascular_mask_data = vascular_mask_img.get_fdata().astype(np.double)
     reshaped_vascular_mask_data = flatten_4d_to_2d(
         np.reshape(

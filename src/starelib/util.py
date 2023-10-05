@@ -2,18 +2,32 @@ import logging
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from collections import namedtuple
 import nibabel as nib
 from nibabel.funcs import concat_images
 import nilearn.image
 from scipy.stats import gaussian_kde
 import warnings
 import pickle
+from nibabel import Nifti1Image
 
 
-# Store each image as a namedtuple with more data
-Image = namedtuple('Image',
-                   'path filename prefix frame nifti usable')
+class StareVolume:
+    """ Wrap a Nifti1Image with additional metadata needed for STARE """
+
+    def __init__(self, nifti, path, filename, prefix, frame, usable):
+        self.nifti = nifti
+        self.path = path
+        self.filename = filename
+        self.prefix = prefix
+        self.frame = frame
+        self.usable = usable
+
+    def save_nifti(self):
+        nib.save(self.nifti, self.path / self.filename)
+
+    def set_affine(self, new_affine):
+        new_img = Nifti1Image(self.nifti.dataobj, new_affine)
+        self.nifti = new_img
 
 
 def flatten_4d_to_2d(a4d, zxy=True):
@@ -92,11 +106,12 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
     return img4d
 
 
-def combine_volumes_into_4d(volumes, output_file, logger=None):
+def combine_volumes_into_4d(volumes, output_file, alerts=None, logger=None):
     """ From a list of 3D volumes, build a 4D image.
 
     :param list volumes: A list of Image tuples describing volumes
     :param output_file: The path to save the 4D file
+    :param alerts: If not None, a list for passing back alerts
     :param logging.Logger logger: A logger for output
 
     :return: The 4D Nifti1Image object
@@ -108,9 +123,30 @@ def combine_volumes_into_4d(volumes, output_file, logger=None):
     output_file = Path(output_file)
 
     # Collect all the 3d image data into a single 4d structure.
+    # First, make sure the volumes are all aligned.
+    # Numpy's np.unique doesn't work for arrays, so we have to roll our own.
+    affine_values, affine_counts = [], []
+    for vi, vol in enumerate(volumes):
+        affine_found = False
+        for ai, a in enumerate(affine_values):
+            if np.array_equal(a, vol.nifti.affine):
+                affine_counts[ai] += 1
+                affine_found = True
+        if not affine_found:
+            affine_values.append(vol.nifti.affine)
+            affine_counts.append(1)
+    if len(affine_counts) > 1:
+        warn_fxn = logger.warning if alerts is None else alerts.append
+        warn_fxn(f"Mismatched affines, potentially misaligned data!")
+        for i in range(len(affine_counts)):
+            warn_fxn(f"{affine_counts[i]} volumes with affine:")
+            warn_fxn(str(affine_values[i]))
+        for vol in volumes:
+            vol.set_affine(affine_values[np.argmax(affine_counts)])
     combined_image = concat_images(
         [v.nifti for v in sorted(volumes, key=lambda x: int(x.frame))]
     )
+
     nib.save(combined_image, str(output_file))
     logger.debug(f"WROTE {output_file.name} ({combined_image.shape}) "
                  f"to {str(output_file.parent)}")
@@ -135,27 +171,28 @@ def explode_4d_into_volumes(
     ignored_volumes = [] if ignored_volumes is None else ignored_volumes
     volumes = []
     write_volumes = True
-    nifti_vols = [image.slicer[:, :, :, t] for t in range(image.shape[3])]
     existing_images = list(out_path.glob("*.nii.gz"))
-    if len(existing_images) >= len(nifti_vols):
+    if len(existing_images) >= image.shape[3]:
         write_volumes = False
         if logger:
             logger.info(f"found {len(existing_images)} volumes in {out_path}, "
                         "not overwriting.")
     # Whether we write or not, still split and keep in memory.
-    for i, nifti_vol in enumerate(nifti_vols):
-        image = Image(
+    for i, nifti_vol in enumerate([
+        image.slicer[:, :, :, t] for t in range(image.shape[3])
+    ]):
+        vol = StareVolume(
+            nifti=nifti_vol,
             path=out_path,
             filename=name_template.format(i + 1),
             prefix="orig",
             frame=i + 1,
-            nifti=nifti_vol,
             usable=((i + 1) not in ignored_volumes),
         )
         if write_volumes:
-            image.path.mkdir(parents=True, exist_ok=True)
-            nib.save(nifti_vol, image.path / image.filename)
-        volumes.append(image)
+            vol.path.mkdir(parents=True, exist_ok=True)
+            vol.save_nifti()
+        volumes.append(vol)
 
     return volumes
 

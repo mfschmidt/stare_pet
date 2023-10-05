@@ -10,7 +10,7 @@ import pickle
 from csv import Sniffer
 
 from .timeactivitycurve import TimeActivityCurve
-from .util import Image, image_in_millicuries,\
+from .util import StareVolume, image_in_millicuries,\
     combine_volumes_into_4d, explode_4d_into_volumes
 
 
@@ -257,10 +257,9 @@ def get_individual_volumes(
             # Store the image if it is not to be ignored.
             if i + 1 in frames_to_ignore:
                 logger.warning(f"Frame {i + 1} exists, and will be ignored.")
-                img = nib.load(img_file)
             else:
                 logger.info(f"Reading volume '{img_file}' as frame {i + 1:02d}")
-                img = nib.load(img_file)
+            img = nib.load(img_file)
             logger.debug(f"  frame {i + 1} is shaped "
                          f"{'n/a' if img is None else img.shape}")
             # No matter the original image format, we will save our own
@@ -277,12 +276,12 @@ def get_individual_volumes(
             nifti_img.header.set_xyzt_units("mm", "sec")
             nifti_file = orig_dir / f"{subject_id}_orig_{i + 1:02d}.nii.gz"
             nib.save(nifti_img, str(nifti_file))
-            volumes.append(Image(
+            volumes.append(StareVolume(
+                nifti=nifti_img,
                 path=nifti_file.parent,
                 filename=nifti_file.name,
                 prefix="orig",
                 frame=i + 1,
-                nifti=nifti_img,
                 usable=((i + 1) not in frames_to_ignore),
             ))
 
@@ -310,7 +309,7 @@ def get_4D_data(
 
     # There's one 4D image to load and break up.
     logger.info(f"Reading 4d image '{img_file}'")
-    combined_image = nib.load(img_file)
+    combined_image = nib.Nifti1Image.from_filename(img_file)
     original_shape = combined_image.shape
     logger.debug(f"  image contains {original_shape[3]} volumes.")
 
@@ -472,7 +471,7 @@ def gather_data(results):
         sys.exit(1)  # No point continuing on
 
     # Preserve original image before removing slices and cropping.
-    mean_image = nib.nifti1.Nifti1Image(
+    mean_image = nib.Nifti1Image(
         np.mean(combined_image.get_fdata(), axis=3),
         affine=combined_image.affine,
     )
