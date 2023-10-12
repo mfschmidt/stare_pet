@@ -228,23 +228,37 @@ def characterize_mid_times(mid_times, missing_mid_times=None, beginning=0.0):
     start_times = [beginning, ]
     rows = []
     for i, t in enumerate(all_times):
-        duration = 2 * (t - start_times[-1])
-        end_time = start_times[-1] + duration
+        if i < 1:
+            last_t = 0.0
+        else:
+            last_t = all_times[i - 1]
+        if i > len(all_times) - 2:
+            next_t = 999999999.9
+        else:
+            next_t = all_times[i + 1]
+        duration = np.min([t - last_t, next_t - t, ])
+        # end_time = start_times[-1] + duration
+        start_time = t - (duration / 2.0)
+        end_time = t + (duration / 2.0)
         row = {
-            "t_start": start_times[-1],
+            "t_start": start_time,
             "t_mid": t,
             "t_end": end_time,
             "duration": duration,
             "used": t in mid_times,
         }
         rows.append(row)
-        start_times.append(end_time)
+        start_times.append(t)
 
     # An alternative way to calculate 't_end' values uses scipy.signals:
     # end_time_frame = lfilter([2, ], [1, 1, ], mid_times)
     # but even though I watch it return identical values,
     # I don't understand how it works, so I wrote it out here
     # explicitly instead. I guess I need to learn more signal processing.
+    # I've also noticed that for cases with a missing frame, the linear
+    # filter can produce oscillating results (that still work OK), and a
+    # manual method that doesn't min the differences can create negative
+    # durations (that don't work at all).
 
     return pd.DataFrame(rows)
 
