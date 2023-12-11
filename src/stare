@@ -8,6 +8,8 @@
     from the command line.
 """
 
+import sys
+
 from starelib.stare_wrapper import get_argument_parser, validate_arguments
 from starelib.stare_results import StareResults
 from starelib.loader import gather_data
@@ -20,7 +22,11 @@ from starelib.minimize_cost import minimize_parameter_cost
 
 
 def main(parsed_args):
-    """ Entry point """
+    """Entry point"""
+
+    # To traverse blobs in k-means space, we need to recurse deeper
+    # than the system default of 3000.
+    sys.setrecursionlimit(10000)
 
     # Asking validate_arguments(parsed_args) to handle arguments allows it to
     # fill in defaults, check for consistency and validity, and
@@ -33,9 +39,7 @@ def main(parsed_args):
         # We can read to it and write from it, and it keeps a log of
         # everything, so building a report at the end is easier.
         results = StareResults(
-            "STARE",
-            f"STARE Results for {parsed_args.subject}",
-            parsed_args
+            "STARE", f"STARE Results for {parsed_args.subject}", parsed_args
         )
         results = gather_data(results)
         results = two_step_cluster(results)
