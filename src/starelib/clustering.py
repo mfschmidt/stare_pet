@@ -143,7 +143,7 @@ def save_centroid_masks(centroids, mask_output_path,
                     out_path=mask_output_path, file_desc=f"step-{step}_best",
                     logger=logger,
                 )
-        if verbose > 1:  # for all centroids, not just the best one
+        if verbose > 2:  # for all centroids, not just the best one
             # Specifying out_path causes masks to be written to disk.
             # Write EVERY cluster to disk for future debugging
             if (mask_output_path.parent / "debug").exists():
@@ -165,9 +165,10 @@ def cluster(results, cluster_function, data, ks, step):
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
+    vol_shape = results.cropped_4D.shape[:3]
     if cached_data is None:
         centroids, model_fits = cluster_function(
-            data, ks, mid_times=results.mid_times,
+            data, vol_shape, ks, mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             verbose=results.args.verbose
         )
