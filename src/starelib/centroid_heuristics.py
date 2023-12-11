@@ -107,7 +107,7 @@ def worker(arg_tuple):
     for i in range(k_means.n_clusters):
         blob_df, blob_ids, voxel_counts = get_cluster_blobs(
             reshape_labels_to_3d(k_means.labels_, vol_shape),
-            label=i, verbose=verbose,
+            label=i, verbose=verbose, messages=log_messages,
         )
         cc = k_means.cluster_centers_[i]
         this_centroid = Centroid(
@@ -138,7 +138,7 @@ def worker(arg_tuple):
                 )
 
     worker_end = datetime.now()
-    print(f"    Finished k-means worker for k {k} "
+    print(f"    Finished k-means worker for k={k} "
           f"at {worker_end.strftime('%m/%d %I:%M')} "
           f"after {worker_end - worker_start}.", flush=True)
 
@@ -198,6 +198,7 @@ def find_centroids(
         k_means_fits[kmeans_result['k']] = kmeans_result['k_means']
         # Rather than logging them out of order, we pool all messages from
         # a given k, hold them, and we emit them all in one chunk here.
+        logger.info(f"K-Means for {kmeans_result['k']} complete.")
         for message in kmeans_result['log_messages']:
             logger.info(message)
 
@@ -373,22 +374,25 @@ def find_vascular_centroids(
         if (c.peak_index == alt_centroid_idx) & (c.features['likely_vascular'])
     ]
     # Of those centroids peaking together, which one peaks highest?
-    alt_centroid = centroids_with_alt_idx[
-        np.argmax([c.peak_value for c in centroids_with_alt_idx])
-    ]
-    if alt_centroid.peak_value > first_choice_centroid.peak_value:
-        if alt_centroid.blob_count < first_choice_centroid.blob_count:
-            # We have an alternate centroid with a higher peak and a more
-            # spatially concise clustering. We will use it.
-            logger.info(
-                f"Overriding the best cluster selection with an alternate!! "
-                f"The original best was {first_choice_centroid.description()}. "
-                f"The new best is {alt_centroid.description()}. "
-            )
-            best_centroid = alt_centroid
+    if len(centroids_with_alt_idx) > 0:
+        alt_centroid = centroids_with_alt_idx[
+            np.argmax([c.peak_value for c in centroids_with_alt_idx])
+        ]
+        if alt_centroid.peak_value > first_choice_centroid.peak_value:
+            if alt_centroid.blob_count < first_choice_centroid.blob_count:
+                # We have an alternate centroid with a higher peak and a more
+                # spatially concise clustering. We will use it.
+                logger.info(
+                    f"Overriding the best cluster selection with an alternate!!"
+                    f" original best was {first_choice_centroid.description()};"
+                    f" new best is {alt_centroid.description()}."
+                )
+                best_centroid = alt_centroid
+            else:
+                logger.info(f"An alternate, {alt_centroid.description()}, "
+                            "was considered and dropped.")
         else:
-            logger.info(f"An alternate centroid, {alt_centroid.description()}, "
-                        "was considered and dropped.")
+            logger.info("No alternate centroids had higher peaks.")
     else:
         logger.info("No alternate centroids were considered.")
 
@@ -519,7 +523,7 @@ def find_peripheral_centroids(
     return all_centroids, k_means_fits
 
 
-def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0):
+def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
     """Find connected blobs in array_3d"""
 
     _voxels_in_mask = []
@@ -608,7 +612,7 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0):
                     _voxels_in_mask.append((x, y, z))
 
     # Run through only in-mask voxels, adding them to a numbered blob.
-    print(f"Label {label} has {len(_voxels_in_mask):,} voxels.")
+    # print(f"Label {label} has {len(_voxels_in_mask):,} voxels.")
     for x, y, z in _voxels_in_mask:
         if (x, y, z) not in _blobs:
             voxels_added_by_scan += 1
@@ -631,18 +635,18 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0):
         ]
     )
     blob_ids, voxel_counts = np.unique(blob_data["blob"], return_counts=True)
-    if verbose > 0:
-        print(
+    if (verbose > 0) and (messages is not None):
+        messages.append(
             f"Label {label}: {len(blob_ids):,} blobs "
             f"with {np.mean(voxel_counts):0,.1f} voxels each"
         )
-    if verbose > 1:
-        print(
+    if (verbose > 1) and (messages is not None):
+        messages.append(
             f"  found {len(blob_data):,} voxels, grouped them into "
             f"{len(blob_data['blob'].unique()):,} blobs "
             f"with max gap of {max_gap}."
         )
-        print(
+        messages.append(
             f"  {voxels_added_by_scan:,} voxels were added while scanning, "
             f"{voxels_added_recursively:,} were added recursively."
         )

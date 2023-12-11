@@ -186,8 +186,14 @@ def plot_vascular_tacs(
         axes.legend(
             bbox_to_anchor=(1.04, 0.5), loc="center left", borderaxespad=0
         )
-    fig.suptitle(f"Optimal vascular TACs: {data['k'].min()}-{data['k'].max()}"
-                 " k-means clusters")
+    if data['k'].min() == data['k'].max():
+        fig.suptitle(f"Optimal vascular TACs: "
+                     f"k={data['k'].min()}"
+                     " k-means clusters")
+    else:
+        fig.suptitle(f"Optimal vascular TACs: "
+                     f"k from {data['k'].min()}-{data['k'].max()}"
+                     " k-means clusters")
 
     return fig
 
