@@ -4,6 +4,13 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.7.0, 2023-12-11
+
+- Introduced a blob detection algorithm for calculating how concise
+  each cluster is.
+- Allow overriding of initial cluster selection if a peak at the next
+  time point is higher, and that cluster is more spatially concise.
+
 Version 0.6.7, 2023-08-29
 
 - Aligned loggers so info and debug output should write out correctly.
