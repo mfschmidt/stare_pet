@@ -112,6 +112,8 @@ class Results:
         self.report.end()
         self._logger.info(f"{str(self.elapsed())} elapsed.")
         self._logger.info(f"End {self._name} at {self.end_time_str}.")
+        for handler in self._logger.handlers:
+            handler.flush()
 
     def elapsed(self):
         return datetime.now() - self._start_datetime

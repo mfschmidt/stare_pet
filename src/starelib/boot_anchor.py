@@ -112,7 +112,8 @@ def fit_curves_mp(
         uniform_tac,
         results.corrected_tacs,
         num_2tc_params,
-        results.args.vasc_corr_pct
+        results.args.vasc_corr_pct,
+        results.logger,
     ) for i in range(num_curves)]
 
     curve_fit_results = run_in_mp_queue(
@@ -304,11 +305,13 @@ def worker(arg_tuple):
     # and the worker must unpack them.
     # This order must match exactly the order where they're packed in.
     (i, curve_generator, vascular_tac, uniform_tac, corrected_regional_tacs,
-        num_2tc_params, vasc_corr_pct) = arg_tuple
+        num_2tc_params, vasc_corr_pct, logger) = arg_tuple
 
     worker_start = datetime.now()
-    print(f"    Starting worker for curve {i} "
-          f"at {worker_start.strftime('%m/%d %I:%M')}", flush=True)
+    logger.debug(f"    Starting worker for curve {i} "
+                 f"at {worker_start.strftime('%m/%d %I:%M')}")
+    for handler in logger.handlers:
+        handler.flush()
 
     cumulative_errors = []
     failed_bootstrap_curves = []
@@ -345,9 +348,11 @@ def worker(arg_tuple):
             final_curve = good_rate_constants  # triggers break from while loop
 
     worker_end = datetime.now()
-    print(f"    Finished worker for region {i} "
-          f"at {worker_end.strftime('%m/%d %I:%M')} "
-          f"after {worker_end - worker_start}.", flush=True)
+    logger.debug(f"    Finished worker for curve {i} "
+                 f"at {worker_end.strftime('%m/%d %I:%M')} "
+                 f"after {worker_end - worker_start}.")
+    for handler in logger.handlers:
+        handler.flush()
 
     return {
         "i": i,
@@ -403,7 +408,7 @@ def boot_anchor(results):
     if good_curves_fits is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
         good_curves_fits = fit_curves_mp(
-            results, bootstrap_iterations, num_2tc_params
+            results, bootstrap_iterations, num_2tc_params,
         )
         to_cache(good_curves_fits, results.args.cache_path, cache_file)
     else:
