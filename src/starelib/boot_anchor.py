@@ -171,39 +171,47 @@ def fit_curve_to_regional_tacs(
             # Use weights, not sigmas, for func2tc_model. It weights
             # residuals within the function, not depending on the
             # curve fitting library to do so.
-            ls_result = least_squares(
-                func2tc_model,
-                x0.ravel(),
-                bounds=(lower_bounds.ravel(), upper_bounds.ravel()),
-                kwargs={
-                    "uniform_mid_times": uniform_tac.timepoints,
-                    "mid_times": vascular_tac.timepoints,
-                    "full_boot_curve_fit_uniform": good_curve,
-                    "tac": vasc_corr_tac,
-                    "weights": vascular_tac.weights(),
-                    "tracer": 'FDG'
-                }
-            )
-            if ls_result.success:
-                # This should only happen once per j, and not overwrite rcs
-                successes += 1
-                rate_constants[j, :] = np.real(ls_result.x)
-                fit_successes.append({
-                    "code": 0,
-                    "fit": "tac",
-                    "desc": "successful fit",
-                    "p0": list(x0.ravel()),
-                })
-            else:
-                # This can happen repeatedly, no harm in overwriting nans
+            try:
+                ls_result = least_squares(
+                    func2tc_model,
+                    x0.ravel(),
+                    bounds=(lower_bounds.ravel(), upper_bounds.ravel()),
+                    kwargs={
+                        "uniform_mid_times": uniform_tac.timepoints,
+                        "mid_times": vascular_tac.timepoints,
+                        "full_boot_curve_fit_uniform": good_curve,
+                        "tac": vasc_corr_tac,
+                        "weights": vascular_tac.weights(),
+                        "tracer": 'FDG'
+                    }
+                )
+                if ls_result.success:
+                    # This should only happen once per j, and not overwrite rcs
+                    successes += 1
+                    rate_constants[j, :] = np.real(ls_result.x)
+                    fit_successes.append({
+                        "code": 0,
+                        "fit": "tac",
+                        "desc": "successful fit",
+                        "p0": list(x0.ravel()),
+                    })
+                else:
+                    # This can happen repeatedly, no harm in overwriting nans
+                    fit_errors.append({
+                        "code": 21,
+                        "fit": "tac",
+                        "desc": "least squares failure to fit",
+                        "p0": list(x0.ravel()),
+                    })
+                    failures += 1
+            except ValueError:
                 fit_errors.append({
-                    "code": 21,
+                    "code": 99,
                     "fit": "tac",
-                    "desc": "least squares failure to fit",
+                    "desc": "ValueError in least_squares",
                     "p0": list(x0.ravel()),
                 })
                 failures += 1
-
     # If any of the fits, for any of the regions is near 0 or 1,
     # invalidate the whole thing. 2TCM should not be 0 or 1
     if len(fit_successes) > 0:
