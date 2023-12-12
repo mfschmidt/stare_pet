@@ -195,8 +195,9 @@ def get_mid_times(results):
         results.source_mid_times_path = results.source_tacs_path
 
     if (len(results.args.ignore_frames) > 0) and local_mid_times is not None:
+        plural = "s" if len(results.args.ignore_frames) > 1 else ""
         results.logger.warning(
-            f"  {len(results.args.ignore_frames)} frames being removed."
+            f"  {len(results.args.ignore_frames)} frame{plural} being removed."
         )
         ignored_mid_times = local_mid_times[
             local_mid_times.index.isin(
@@ -335,7 +336,8 @@ def gather_data(results):
     rpt_sect = results.report.begin_section("Gather Data")
     issued_command = " ".join(sys.argv)
 
-    logger.debug(f"{results.name} is running with these arguments.")
+    logger.debug(f"{results.name} {results.report.app_version} "
+                 f"is running with these arguments.")
     for k, v in vars(results.args).items():
         spaces = " " * (23 - len(k))
         logger.debug(f"  '{k}'{spaces}: {v}")

@@ -215,6 +215,8 @@ def two_step_cluster(results):
 
     pre_kmc_timestamp = datetime.now()
     logger.info(f"Started two-level k-means clustering at {pre_kmc_timestamp}")
+    for handler in logger.handlers:
+        handler.flush()
 
     # -------------------------------------------------------------------------
     # Step 0. Collect the individual 3D volumes provided,
@@ -296,7 +298,7 @@ def two_step_cluster(results):
         rpt_sect.add_link(results.args.fig_path / filename, text=caption)
 
         # For debugging, plot all clusters for each k, to see best vs rest
-        if results.args.verbose > 1:
+        if results.save_all_cluster_masks or (results.args.verbose > 1):
             unique_ks = sorted(np.unique([
                 c.k for c in results.cluster_centroids[step]
             ]))

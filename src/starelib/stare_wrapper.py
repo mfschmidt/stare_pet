@@ -2,6 +2,7 @@ import os
 import argparse
 from pathlib import Path
 from multiprocessing import cpu_count
+import warnings
 
 
 def get_argument_parser():
@@ -72,6 +73,10 @@ def get_argument_parser():
         help="How many iterations should the annealer be capped at?"
     )
     parser.add_argument(
+        "--save-all-cluster-masks", action="store_true",
+        help="Turn on to save nifti masks of all clusters, not just best"
+    )
+    parser.add_argument(
         "-f", "--options-file", type=str,
         help="A file containing command-line arguments."
              "The arguments in the file will override defaults,"
@@ -107,6 +112,11 @@ def validate_arguments(args):
 
     # Cache error messages, so we can report them all at once.
     errors = []
+
+    # Turn off warnings from other libraries about deprecated functions and
+    # the like. We only care if we are debugging with high verbosity.
+    if args.verbose < 2:
+        warnings.filterwarnings("ignore")
 
     # Ensure the input location exists, and contains the subject.
     if Path(args.input_path).exists():
@@ -157,8 +167,6 @@ def validate_arguments(args):
                 ['cerfullcs_c', 'cin', 'hip', 'par', 'pph', 'pip', ])
         # msg = f"No regions are specified; there's nothing to be done."
         # errors.append(msg)
-    else:
-        print("regions are good, no need to overwrite.")
 
     # Ignored frames should be indexed by integer
     if args.ignore_frames is None:
