@@ -298,7 +298,7 @@ def two_step_cluster(results):
         rpt_sect.add_link(results.args.fig_path / filename, text=caption)
 
         # For debugging, plot all clusters for each k, to see best vs rest
-        if results.save_all_cluster_masks or (results.args.verbose > 1):
+        if results.args.save_all_cluster_masks or (results.args.verbose > 1):
             unique_ks = sorted(np.unique([
                 c.k for c in results.cluster_centroids[step]
             ]))
