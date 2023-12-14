@@ -55,12 +55,25 @@ class TimeActivityCurve:
         return f"{len(self.activity)} samples from {self.source}"
 
     def to_dict(self):
-        return {
+        d = {
+            "name": self.name,
             "timepoints": self.timepoints,
             "activity": self.activity,
             "source": self.source,
-            "name": self.name,
+            "peak_index": self.peak_index,
+            "peak_value": self.peak_value,
+            "auc": self.auc(),
         }
+        for f in self.features:
+            if isinstance(self.features[f], tuple) or isinstance(f, list):
+                for i, thing in enumerate(self.features[f]):
+                    d[f"feature_{f}_{i + 1}"] = thing
+            elif isinstance(self.features[f], dict):
+                for k, v in self.features[f].items():
+                    d[f"feature_{f}_{k}"] = v
+            else:
+                d[f"feature_{f}"] = self.features[f]
+        return d
 
     def _find_uniform_time_delta(self):
         # * Note that 'i' intentionally accesses the item just prior to
@@ -92,6 +105,9 @@ class TimeActivityCurve:
 
     def post_peak_sd(self):
         return None if self.sd is None else self.sd[self.peak_index:]
+
+    def auc(self):
+        return np.trapz(y=self.activity, x=self.timepoints)
 
     def weights(self, method='sqrt'):
         """ Determine weights, based on timepoints, by method
@@ -206,4 +222,3 @@ class TimeActivityCurve:
             source="uniform_interpolator",
             name="uniform_time_only",
         )
-

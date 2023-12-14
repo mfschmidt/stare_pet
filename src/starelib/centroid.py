@@ -11,6 +11,7 @@ class Centroid(TimeActivityCurve):
                  label,  # should be non-zero as zero indicates background
                  k,
                  labels,
+                 source="",
                  blob_count=0,
                  voxels_per_blob=0,
                  name=None,
@@ -25,6 +26,7 @@ class Centroid(TimeActivityCurve):
         self.labels = labels  # ndarray shaped like (1000000,)
         self.best_in_k = best_in_k
         self.best_overall = best_overall
+        self.source = source
         self.blob_count = blob_count
         self.voxels_per_blob = voxels_per_blob
 
@@ -34,6 +36,17 @@ class Centroid(TimeActivityCurve):
             f" (best in k={self.k})" if self.best_in_k else "",
             f" (best overall)" if self.best_overall else "",
         )
+
+    def to_dict(self):
+        d = super().to_dict()
+        d["label"] = self.label
+        d["k"] = self.k
+        d["best_in_k"] = self.best_in_k
+        d["best_overall"] = self.best_overall
+        d["voxels_per_blob"] = self.voxels_per_blob
+        d["blob_count"] = self.blob_count
+        d["source"] = self.source
+        return d
 
     def description(self):
         if self.best_overall:
