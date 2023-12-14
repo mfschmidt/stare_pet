@@ -4,6 +4,15 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.7.3, 2023-12-13
+
+- Expanded TimeActivityCurve and Centroid objects
+- Allow toggling enhanced cluster selection off
+- Allow writing all cluster masks without --debug
+- Removed warnings, so millions of fit failures are only written in --debug
+- Reworked --debug vs --verbose to be more intuitive and reasonable, I hope
+- Built a table of cluster centroids that's saved as csv.
+- Added linear slope, intercept, and area under the curve of TACs
 Version 0.7.0, 2023-12-11
 
 - Introduced a blob detection algorithm for calculating how concise

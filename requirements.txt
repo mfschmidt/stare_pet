@@ -30,7 +30,7 @@ matplotlib==3.8.2
     # via
     #   seaborn
     #   stare-pet (setup.py)
-nibabel==5.1.0
+nibabel==5.2.0
     # via
     #   nilearn
     #   stare-pet (setup.py)
