@@ -1,5 +1,6 @@
 from pathlib import Path
 import numpy as np
+import pandas as pd
 import logging
 import nibabel as nib
 from nilearn import image
@@ -12,6 +13,7 @@ from .centroid import Centroid
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
 from .plotting import plot_top_centroids_atlas
 from .centroid_heuristics import find_vascular_centroids
+from .centroid_heuristics import likely_irreversible_linear
 
 
 def make_atlas_and_mask(
@@ -157,6 +159,26 @@ def save_centroid_masks(centroids, mask_output_path,
     return best_mask_path
 
 
+def tabulate_centroids(centroids, added_columns=None):
+    """ Make a table of all centroid information as a dataframe.
+
+    :param centroids: an iterable of Centroid objects to describe
+    :param added_columns: a dict of name: value pairs to add to the table
+
+    :returns: a dataframe with each centroid described in each row
+    """
+
+    centroid_rows = []
+    for centroid in centroids:
+        centroid_rows.append(centroid.to_dict())
+    df = pd.DataFrame(centroid_rows)
+    df = df.drop(["timepoints", "activity"], axis=1)
+    if added_columns is not None:
+        for k, v in added_columns.items():
+            df[k] = v
+    return df
+
+
 def cluster(results, cluster_function, data, ks, step):
     # If prior models were saved to disk, load them rather than running.
     cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
@@ -168,7 +190,9 @@ def cluster(results, cluster_function, data, ks, step):
     vol_shape = results.cropped_4D.shape[:3]
     if cached_data is None:
         centroids, model_fits = cluster_function(
-            data, vol_shape, ks, mid_times=results.mid_times,
+            data, vol_shape, ks,
+            allow_override=(not results.args.no_cluster_override),
+            mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             verbose=results.args.verbose
         )
@@ -258,6 +282,36 @@ def two_step_cluster(results):
     # If prior models were saved to disk, load them rather than running.
     cluster(results, cluster_function, top_centroid_masked_data, step_two_ks, 2)
     rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
+
+    # Output a table of all centroids with their features and slopes
+    # We need to get slopes and intercepts for centroids first
+    for step in [1, 2]:
+        for c in results.cluster_centroids[step]:
+            m1, b1 = likely_irreversible_linear(
+                c, return_features=True, skip_t0=False
+            )
+            c.features["line_whole"] = {"slope": m1, "intercept": b1}
+            m2, b2 = likely_irreversible_linear(
+                c, return_features=True, skip_t0=True
+            )
+            c.features["line_wo_first"] = {"slope": m2, "intercept": b2}
+    # And now, build the table and write it with other results.
+    centroid_table = pd.concat([
+        tabulate_centroids(
+            results.cluster_centroids[1],
+            added_columns={'subject': results.args.subject, 'step': 1},
+        ),
+        tabulate_centroids(
+            results.cluster_centroids[2],
+            added_columns={'subject': results.args.subject, 'step': 2},
+        ),
+    ], axis=0).reset_index(drop=True)
+    filename = f"sub-{results.args.subject}_vascular_cluster_metadata.csv"
+    # Order columns so subject and step are first
+    cols = [c for c in centroid_table.columns if c not in ['subject', 'step']]
+    centroid_table[['subject', 'step', ] + cols].to_csv(
+        results.args.debug_path / filename, index=False, float_format='%0.5f'
+    )
 
     # Plot the top centroids over PET data, and add it to the report.
     pet_avg_img = image.mean_img(results.cropped_4D)
