@@ -42,7 +42,7 @@ def correct_partial_volumes(results):
             "-y", f"{results.args.fwhm:0.1f}",
             "-z", f"{results.args.fwhm:0.1f}",
         ]
-        if results.args.verbose:
+        if results.args.debug:
             full_command = full_command + ["--debug", ]
         logger.debug("Running '" + " ".join(full_command) + "'")
         if pvc_path.exists() and not results.args.force:
@@ -108,12 +108,13 @@ def correct_partial_volumes(results):
         source="pvc",
         name="pvc",
     )
-    with open(
+    if results.args.debug:
+        with open(
             results.args.debug_path /
             f"sub-{results.args.subject}_tac_pvc.pkl",
             "wb"
-    ) as f:
-        pickle.dump(results.pvc_mean_vascular_tac, f)
+        ) as f:
+            pickle.dump(results.pvc_mean_vascular_tac, f)
 
     tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
         results.args.output_path /

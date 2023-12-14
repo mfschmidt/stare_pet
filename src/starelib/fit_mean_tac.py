@@ -217,7 +217,7 @@ def fit_vascular_mean_tac(results):
         failures = successes_and_failures[1]
         logger.info("  loaded cached step 3 decay model fits to save time")
 
-    if results.args.debug_path is not None:
+    if results.args.debug and results.args.debug_path.exists():
         with open(
                 results.args.debug_path /
                 f"sub-{results.args.subject}_fits.pkl",
@@ -245,7 +245,7 @@ def fit_vascular_mean_tac(results):
                       "original and high resolution.")
     rpt_sect.add_line(html_equation_from_fit(best_fit), css_class='equation')
 
-    if results.args.verbose > 0 and results.args.debug_path is not None:
+    if results.args.debug and results.args.debug_path.exists():
         with open(
                 results.args.debug_path /
                 f"sub-{results.args.subject}_tac_from_fitting.pkl",

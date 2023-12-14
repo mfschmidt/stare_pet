@@ -56,7 +56,9 @@ class StareResults(Results):
         self.final_rate_df = None
 
     def __str__(self):
-        return f"{self._name} results from {self.start_time_str}"
+        return "{} {} results from {}".format(
+            self._name, self.report.app_version, self.start_time_str
+        )
 
     @property
     def regions(self):

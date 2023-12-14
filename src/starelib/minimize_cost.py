@@ -255,7 +255,7 @@ def minimize_parameter_cost(results):
 
     if results.args.debug:
         with open(
-            results.args.cache_path /
+            results.args.debug_path /
             f"sub-{results.args.subject}_step-5_results.pkl",
             "wb"
         ) as f:

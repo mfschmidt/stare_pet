@@ -218,9 +218,9 @@ def find_curve_fits(
                     "desc": "fit converged, but converged to Infinity",
                     "p0": p0,
                 })
-                logger.info("a curve fit converged, but converged to infinity, "
-                            f"failure {len(failures)} for this model, "
-                            f"{len(successes)} successes.")
+                logger.debug("a curve fit converged, but converged to infinity,"
+                             f" failure {len(failures)} for this model, "
+                             f"{len(successes)} successes.")
             elif weighted_error > 10.0:
                 failures.append({
                     "code": 4,
@@ -229,10 +229,10 @@ def find_curve_fits(
                             f"{weighted_error:0.2f} (rms {rms:0.2f}) is high.",
                     "p0": p0,
                 })
-                logger.info("a curve fit converged, but weighted error of "
-                            f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
-                            f"failure {len(failures)} for this model, "
-                            f"{len(successes)} successes.")
+                logger.debug("a curve fit converged, but weighted error of "
+                             f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
+                             f"failure {len(failures)} for this model, "
+                             f"{len(successes)} successes.")
             else:
                 successes.append({
                     "parameters": fit_parameters,
@@ -247,18 +247,18 @@ def find_curve_fits(
             failures.append({
                 "code": 11, "fit": "exp", "desc": e.args[0], "p0": p0,
             })
-            logger.info("a curve fit failed to converge, "
-                        f"failure {len(failures)} for this model, "
-                        f"{len(successes)} successes.")
+            logger.debug("a curve fit failed to converge, "
+                         f"failure {len(failures)} for this model, "
+                         f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except OptimizeWarning as e:
             failures.append({
                 "code": 12, "fit": "exp", "desc": e.args[0], "p0": p0,
             })
-            logger.info("a curve fit raised an optimize warning, "
-                        f"failure {len(failures)} for this model, "
-                        f"{len(successes)} successes.")
+            logger.debug("a curve fit raised an optimize warning, "
+                         f"failure {len(failures)} for this model, "
+                         f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except RuntimeWarning:
@@ -266,12 +266,13 @@ def find_curve_fits(
                 "code": 13, "fit": "exp",
                 "desc": "overflow encountered, probably", "p0": p0,
             })
-            logger.info("a curve fit raised a runtime warning, "
-                        f"failure {len(failures)} for this model, "
-                        f"{len(successes)} successes.")
+            logger.debug("a curve fit raised a runtime warning, "
+                         f"failure {len(failures)} for this model, "
+                         f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
     warnings.resetwarnings()
+    warnings.filterwarnings("ignore")
     logger.info(f"{len(successes)} converged and "
                 f"{len(failures)} failed to converge.")
 
@@ -353,6 +354,9 @@ def source_to_target_tissue_model(
                 source_tac_uniform
             )
         )
+        # TODO: check for infinite values in zeta? There's a value error
+        #       running NHFDG047, but only once. Maybe a
+        #       try/catch ValueError block with a printout of all the vars?
         impulse_response_func[:, i] = pchip_interpolate(
             xi=uniform_tac.timepoints, yi=zeta,
             x=source_tac.timepoints
@@ -416,7 +420,7 @@ class TwoTissueCompartmentModel:
         self.desc = desc
 
     def __str__(self):
-        return(
+        return (
             "'{desc}': ki = k1 * (k3 / (k2 + k3)) = "
             "{k1:0.2f} * ({k3:0.2f} / ({k2:0.2f} + {k3:0.2f})) = "
             "{ki:0.2f}".format(
