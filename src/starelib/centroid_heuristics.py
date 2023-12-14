@@ -21,6 +21,26 @@ def likely_irreversible(c):
     return c.activity[-1] == max(c.activity)
 
 
+def likely_irreversible_linear(c, return_features=False, skip_t0=False):
+    """ Return true if centroid has a positive slope.
+
+    :param Centroid c: The centroid to assess
+    :param return_features: Return (slope, intercept) rather than a boolean
+    :param skip_t0: Calculate slope from all but the first point
+    :return: True if centroid has a positive slope.
+    """
+
+    if skip_t0:
+        slope, intercept = np.polyfit(c.timepoints[1:], c.activity[1:], 1)
+    else:
+        slope, intercept = np.polyfit(c.timepoints, c.activity, 1)
+
+    if return_features:
+        return slope, intercept
+    else:
+        return slope > 0.0
+
+
 def likely_noise(c):
     """Return true if centroid appears to just be noise.
 
@@ -117,6 +137,7 @@ def worker(arg_tuple):
             k=k,
             labels=k_means.labels_ + 1,
             name=f"centroid {i + 1}/{k}",
+            source="k-means",
             blob_count=len(blob_ids),
             voxels_per_blob=np.mean(voxel_counts),
         )
@@ -151,14 +172,14 @@ def worker(arg_tuple):
 
 
 def find_centroids(
-    data,
-    vol_shape,
-    ks,
-    features,
-    mid_times=None,
-    num_cpus=-1,
-    verbose=0,
-    logger=None,
+        data,
+        vol_shape,
+        ks,
+        features,
+        mid_times=None,
+        num_cpus=-1,
+        verbose=0,
+        logger=None,
 ):
     """Step 1. From all PET data, find a vascular cluster.
 
@@ -212,13 +233,14 @@ def find_centroids(
 
 
 def find_vascular_centroids(
-    data,
-    vol_shape,
-    ks,
-    mid_times=None,
-    num_cpus=-1,
-    verbose=0,
-    logger=None,
+        data,
+        vol_shape,
+        ks,
+        allow_override=True,
+        mid_times=None,
+        num_cpus=-1,
+        verbose=0,
+        logger=None,
 ):
     """Step 1. From all PET data, find a vascular cluster.
 
@@ -229,6 +251,7 @@ def find_vascular_centroids(
     :param ndarray data: Array of timeseries
     :param tuple vol_shape: The original 3d shape of each column vector in data
     :param iterable ks: Iterable of integers, each used as a k in k-means
+    :param bool allow_override: Check for a higher cluster one t later
     :param iterable mid_times: will be stored alongside activity in TACs
     :param int num_cpus: how many processes to use on finding centroids
     :param int verbose: Set non-zero to increase logging, higher is more
@@ -243,6 +266,7 @@ def find_vascular_centroids(
     vascular_features = {
         "likely_noise": likely_noise,
         "likely_irreversible": likely_irreversible,
+        "likely_irreversible_linear": likely_irreversible_linear,
         "likely_vascular": likely_vascular,
     }
     all_centroids, k_means_fits = find_centroids(
@@ -368,33 +392,41 @@ def find_vascular_centroids(
     # centroid was not 'best_in_k', because 'best_in_k' was also
     # restricted to this same earliest peak. We explicitly want to see
     # if the peak being too early caused us to miss a better option here.
-    alt_centroid_idx = best_centroid_idx + 1
-    centroids_with_alt_idx = [
-        c for c in all_centroids
-        if (c.peak_index == alt_centroid_idx) & (c.features['likely_vascular'])
-    ]
-    # Of those centroids peaking together, which one peaks highest?
-    if len(centroids_with_alt_idx) > 0:
-        alt_centroid = centroids_with_alt_idx[
-            np.argmax([c.peak_value for c in centroids_with_alt_idx])
+    if allow_override:
+        alt_centroid_idx = best_centroid_idx + 1
+        centroids_with_alt_idx = [
+            c for c in all_centroids
+            if ((c.peak_index == alt_centroid_idx) &
+                (c.features['likely_vascular']))
         ]
-        if alt_centroid.peak_value > first_choice_centroid.peak_value:
-            if alt_centroid.blob_count < first_choice_centroid.blob_count:
-                # We have an alternate centroid with a higher peak and a more
-                # spatially concise clustering. We will use it.
-                logger.info(
-                    f"Overriding the best cluster selection with an alternate!!"
-                    f" original best was {first_choice_centroid.description()};"
-                    f" new best is {alt_centroid.description()}."
-                )
-                best_centroid = alt_centroid
+        # Of those centroids peaking together, which one peaks highest?
+        if len(centroids_with_alt_idx) > 0:
+            alt_centroid = centroids_with_alt_idx[
+                np.argmax([c.peak_value for c in centroids_with_alt_idx])
+            ]
+            if alt_centroid.peak_value > first_choice_centroid.peak_value:
+                if alt_centroid.blob_count < first_choice_centroid.blob_count:
+                    # We have an alternate centroid with a higher peak and a
+                    # less spatially sparse clustering. We will use it.
+                    logger.info(
+                        f"Overriding the cluster selection with an alternate!!"
+                        f" original best {first_choice_centroid.description()};"
+                        f" new best is {alt_centroid.description()}."
+                    )
+                    best_centroid.source = ", ".join([
+                        best_centroid.source, "original best, overridden"
+                    ])
+                    alt_centroid.source = ", ".join([
+                        alt_centroid.source, "overrides first choice"
+                    ])
+                    best_centroid = alt_centroid
+                else:
+                    logger.info(f"An alternate, {alt_centroid.description()}, "
+                                "was considered and dropped.")
             else:
-                logger.info(f"An alternate, {alt_centroid.description()}, "
-                            "was considered and dropped.")
+                logger.info("No alternate centroids had higher peaks.")
         else:
-            logger.info("No alternate centroids had higher peaks.")
-    else:
-        logger.info("No alternate centroids were considered.")
+            logger.info("No alternate centroids were considered.")
 
     # Label the centroid with the highest peak value
     best_centroid.best_overall = True
@@ -407,13 +439,13 @@ def find_vascular_centroids(
 
 
 def find_peripheral_centroids(
-    data,
-    vol_shape,
-    ks,
-    num_cpus=-1,
-    mid_times=None,
-    verbose=0,
-    logger=None,
+        data,
+        vol_shape,
+        ks,
+        num_cpus=-1,
+        mid_times=None,
+        verbose=0,
+        logger=None,
 ):
     """Step 1. From all PET data, find a peripheral cluster.
 
@@ -469,7 +501,8 @@ def find_peripheral_centroids(
             earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
             highest_early_peak_idx = earliest_peak_idxs[
                 np.argmax(
-                    [vascular_centroids[i].peak_value for i in earliest_peak_idxs]
+                    [vascular_centroids[i].peak_value for i in
+                     earliest_peak_idxs]
                 )
             ]
             # Label this centroid as best, at least for this value of k
@@ -546,14 +579,14 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
             for _y in range(loc[1] - max_gap, loc[1] + max_gap + 1):
                 for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
                     if (
-                        still_looking
-                        and ((_x, _y, _z) in _blobs)
-                        and (_x >= 0)
-                        and (_x < array_3d.shape[0])
-                        and (_y >= 0)
-                        and (_y < array_3d.shape[1])
-                        and (_z >= 0)
-                        and (_z < array_3d.shape[2])
+                            still_looking
+                            and ((_x, _y, _z) in _blobs)
+                            and (_x >= 0)
+                            and (_x < array_3d.shape[0])
+                            and (_y >= 0)
+                            and (_y < array_3d.shape[1])
+                            and (_z >= 0)
+                            and (_z < array_3d.shape[2])
                     ):
                         current_blob_id = _blobs[(_x, _y, _z)]
                         # We know our blob; we can stop cycling through
@@ -578,14 +611,14 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
                 for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
                     try:
                         if (
-                            ((_x, _y, _z) not in _blobs)
-                            and (array_3d[_x, _y, _z] == label)
-                            and (_x >= 0)
-                            and (_x < array_3d.shape[0])
-                            and (_y >= 0)
-                            and (_y < array_3d.shape[1])
-                            and (_z >= 0)
-                            and (_z < array_3d.shape[2])
+                                ((_x, _y, _z) not in _blobs)
+                                and (array_3d[_x, _y, _z] == label)
+                                and (_x >= 0)
+                                and (_x < array_3d.shape[0])
+                                and (_y >= 0)
+                                and (_y < array_3d.shape[1])
+                                and (_z >= 0)
+                                and (_z < array_3d.shape[2])
                         ):
                             # _blobs[(_x, _y, _z)] = current_blob_id
                             # This voxel is in the mask, but not yet labeled
