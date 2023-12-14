@@ -76,6 +76,8 @@ class Results:
         """ Create and configure logger with handlers. """
 
         # Set up a logger to handle output, and attach two handlers
+        # The logger emits everything (DEBUG) and each handler can
+        # filter it as arguments specify.
         self._logger.setLevel(logging.DEBUG)
 
         # Create a handler to write out to the terminal
@@ -102,7 +104,9 @@ class Results:
             fmt="%(asctime)s : %(levelname)s : %(message)s",
             datefmt=self._dt_format,
         ))
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(logging.INFO)
+        if (self._args.verbose > 1) or self._args.debug:
+            file_handler.setLevel(logging.DEBUG)
         self._logger.addHandler(file_handler)
 
         self._logger.info(f"Begin {self._name} at {self.start_time_str}.")
