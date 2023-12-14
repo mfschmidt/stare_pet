@@ -38,13 +38,13 @@ def tac_vascular_correction(results):
             f"Vascular correction of {pct:0.2%} was applied to the raw TACs."
         )
         caption = "TACs before and after vascular correction"
-    corrected_tacs.to_csv(
-        results.args.debug_path /
-        f"sub-{results.args.subject}_step-3_corrected_tacs.tsv",
-        sep='\t', index=False,
-    )
     fig = plot_before_and_after_tacs(
         results.tacs, corrected_tacs, results.mid_times,
+    )
+    corrected_tacs.to_csv(
+        results.args.fig_path /
+        f"sub-{results.args.subject}_step-3_vascular_corrected_tacs.tsv",
+        sep='\t', index=False,
     )
     fig.savefig(
         results.args.fig_path /
