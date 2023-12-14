@@ -77,6 +77,14 @@ def get_argument_parser():
         help="Turn on to save nifti masks of all clusters, not just best"
     )
     parser.add_argument(
+        "--no-cluster-override", action="store_true",
+        help="Turn on to ensure the first cluster selected is used"
+    )
+    parser.add_argument(
+        "--output-all-fit-failures", action="store_true",
+        help="Turn on to emit a note on each curve fit failure to the log"
+    )
+    parser.add_argument(
         "-f", "--options-file", type=str,
         help="A file containing command-line arguments."
              "The arguments in the file will override defaults,"
@@ -88,7 +96,7 @@ def get_argument_parser():
     )
     parser.add_argument(
         "--debug", action="store_true",
-        help="If set, data will be pickled and saved to the debug directory.",
+        help="Log extra data and pickle extra data to the debug directory.",
     )
     parser.add_argument(
         "--force", action="store_true",
@@ -114,8 +122,8 @@ def validate_arguments(args):
     errors = []
 
     # Turn off warnings from other libraries about deprecated functions and
-    # the like. We only care if we are debugging with high verbosity.
-    if args.verbose < 2:
+    # the like. We only care if we are debugging.
+    if not args.debug:
         warnings.filterwarnings("ignore")
 
     # Ensure the input location exists, and contains the subject.
