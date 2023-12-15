@@ -118,7 +118,8 @@ def correct_partial_volumes(results):
 
     tacs_to_plottable_dataframe([results.pvc_mean_vascular_tac, ]).to_csv(
         results.args.output_path /
-        f"sub-{results.args.subject}_step-2_pvc_mean_tac.csv"
+        f"sub-{results.args.subject}_step-2_pvc_mean_tac.csv",
+        index=False,
     )
     logger.info(f"WROTE sub-{results.args.subject}_step-2_pvc_mean_tac.csv to "
                 f"{str(results.args.output_path)}")

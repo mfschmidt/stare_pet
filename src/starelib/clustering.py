@@ -384,7 +384,7 @@ def two_step_cluster(results):
         # These data can be used to build custom plots or otherwise explore.
         filename = f"sub-{results.args.subject}_step-1-{step}_kmeans_tac.csv"
         tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
-            results.args.output_path / filename
+            results.args.output_path / filename, index=False,
         )
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 

@@ -69,23 +69,24 @@ def tacs_to_plottable_dataframe(tacs):
     rows = []
     for tac in tacs:
         if tac is not None:
+            tac_dict = tac.to_dict()
             for i, activity in enumerate(tac.activity):
                 row = {
-                    "t": tac.timepoints[i],  # Ignore index values, take i'th t
+                    "t": tac.timepoints[i],  # Ignore idx values, take i'th t
                     "activity": activity,  # The y-axis plotted value, in mCis
-                    "k": tac.k if hasattr(tac, 'k') else 0,
-                    "label": tac.label if hasattr(tac, 'label') else 0,
-                    "source": tac.source,
-                    "best_overall": (tac.best_overall
-                                     if hasattr(tac, 'best_overall')
-                                     else False),
-                    "best_in_k": (tac.best_in_k
-                                  if hasattr(tac, 'best_in_k')
-                                  else False),
-                    "name": "n/a" if tac.name is None else tac.name,
+                    "k": tac_dict.get('k', 0),
+                    "label": tac_dict.get('label', 0),
+                    "source": tac_dict.get('source', "n/a"),
+                    "best_overall": tac_dict.get('best_overall', False),
+                    "best_in_k": tac_dict.get('best_in_k', False),
+                    "name": tac_dict.get('name', "n/a"),
                 }
-                for feature, label in tac.features.items():
-                    row[feature] = label
+                for k, v in tac_dict.items():
+                    if k.startswith('feature_'):
+                        row[k[8:]] = v
+                # for feature, label in tac.features.items():
+                #     row[feature] = label
+
                 rows.append(row)
 
     return pd.DataFrame(rows)
@@ -238,7 +239,7 @@ def plot_top_centroids_atlas(
         )
     two_grade_cmap = ListedColormap(['orange', 'red', ])
     fig = plt.figure(figsize=figsize)
-    axes = fig.add_axes([0, 0, 1, 1, ])
+    axes = fig.add_axes((0, 0, 1, 1, ))
     display = plot_roi(
         roi_img=atlas_combo_img, bg_img=mean_pet_img,
         cmap=two_grade_cmap, black_bg=False, axes=axes,
@@ -476,26 +477,6 @@ def plot_before_and_after_tacs(
     return fig
 
 
-def plot_bootstrap_constant(
-        region_names,
-        rate_constants,
-        k, subject, tracer
-):
-    """ Plot density of constants for each of six regions """
-
-    fig = plot_regional_densities(
-        region_names=region_names,
-        rate_constants=rate_constants,
-        num_bootstraps=1000,
-        coefficient=k,
-        subject=subject,
-        tracer=tracer,
-        verbose=False
-    )
-
-    return fig
-
-
 def winsorize_curves(curves, sds=2):
     """ Remove outliers and return subset of curves. """
 
@@ -632,7 +613,7 @@ def plot_regional_densities(
         num_bootstraps=1000, coefficient="K", subject="Unknown", tracer='FDG',
         verbose=False
 ):
-    """ Plot 6 regions in a figure.
+    """ Plot all regions in a figure.
 
         Plot rate_constants with specified colors. Optionally, also plot
         comp_rate_constants if provided.
@@ -648,13 +629,17 @@ def plot_regional_densities(
         main_prefix = "python"
         comp_prefix = "matlab"
 
+    # Figure out layout and figure size
+    n_cols = int(np.ceil(np.sqrt(len(region_names))))
+    n_rows = int(np.ceil(len(region_names) / n_cols))
     fig, axes = plt.subplots(
-        nrows=2, ncols=3, sharex='all', sharey='all', figsize=(15, 11)
+        nrows=n_rows, ncols=n_cols, sharex='all', sharey='all',
+        figsize=(n_cols * 5, n_rows * 5 + 1)
     )
 
     i = 0
-    for row in range(2):
-        for col in range(3):
+    for row in range(n_rows):
+        for col in range(n_cols):
             if len(region_names) > i:
                 ax = axes[row, col]
                 if comp_rate_constants is not None:
@@ -929,8 +914,13 @@ def plot_all_stare_tac_fits(
         and in a simulated annealing debugger script.
     """
 
+    # Original FDG testing was all done with 6 regions, so a 2-row x 3-col
+    # grid was great. But with variable regions, this needs to be more
+    # versatile. How should we lay out the grid?
+    n_cols = int(np.ceil(np.sqrt(tac_data.shape[1])))  # for 6, round 2.45 up to 3
+    n_rows = int(np.ceil(tac_data.shape[1] / n_cols))
     fig = plt.figure(figsize=figsize, layout="tight")
-    gs = gridspec.GridSpec(2, 3, figure=fig)
+    gs = gridspec.GridSpec(n_rows, n_cols, figure=fig)
     ax_handles = []
     ax_labels = []
 
@@ -942,7 +932,7 @@ def plot_all_stare_tac_fits(
     for i, source_region in enumerate(tac_data.columns):
         # Figure out what axes we're dealing with
         col = col + 1
-        if col > 2:
+        if col >= n_cols:
             col = 0
             row = row + 1
         panel = fig.add_subplot(gs[row, col])

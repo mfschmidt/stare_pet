@@ -273,8 +273,10 @@ def find_curve_fits(
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
     warnings.resetwarnings()
     warnings.filterwarnings("ignore")
-    logger.info(f"{len(successes)} converged and "
-                f"{len(failures)} failed to converge.")
+    logger.info(f"Curve fitting summary: Seeking {success_limit} fits, "
+                f"and tolerating {failure_limit} failures before quitting, "
+                f"{len(failures)} failed to converge and "
+                f"{len(successes)} converged.")
 
     # In the case of success, this is a list of dicts.
     # In the case of failure, it is an empty list.

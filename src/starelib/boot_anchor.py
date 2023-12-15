@@ -8,7 +8,7 @@ from datetime import datetime
 from .util import get_kde_fwhm_points
 from .util import from_cache, to_cache
 from .fitting_models import decay_model, find_curve_fits, func2tc_model
-from .plotting import plot_bootstrap_constant, plot_bootstrap_curves
+from .plotting import plot_regional_densities, plot_bootstrap_curves
 from .mp_queues import run_in_mp_queue
 
 
@@ -511,12 +511,14 @@ def boot_anchor(results):
             rate_consts_for_plot = kis
         else:
             rate_consts_for_plot = results.bootstrap_rate_constants[:, :, i]
-        fig = plot_bootstrap_constant(
+        fig = plot_regional_densities(
             results.corrected_tacs.columns,
             rate_consts_for_plot,
-            k_const,
+            num_bootstraps=num_total_bootstraps,
+            coefficient=k_const,
             subject=results.args.subject,
             tracer=results.args.tracer,
+            verbose=results.args.verbose > 1,
         )
         figure_name = "sub-{}_step-4_bootstrap_{}_density_by_region.png".format(
             results.args.subject, k_const
