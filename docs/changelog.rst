@@ -4,6 +4,10 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.7.4, 2023-12-14
+
+- Fixed plotting to handle more or fewer than six regions
+
 Version 0.7.3, 2023-12-13
 
 - Expanded TimeActivityCurve and Centroid objects
