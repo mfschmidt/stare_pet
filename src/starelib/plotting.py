@@ -625,8 +625,8 @@ def plot_regional_densities(
     i = 0
     for row in range(n_rows):
         for col in range(n_cols):
+            ax = axes[row, col]
             if len(region_names) > i:
-                ax = axes[row, col]
                 if comp_rate_constants is not None:
                     plot_density(
                         comp_rate_constants[:, i], ax=ax,
@@ -645,6 +645,8 @@ def plot_regional_densities(
                 ax.set_title(region_names[i])
                 ax.set_xlabel("micro-parameter estimate")
                 ax.set_ylabel("bootstrap iterations")
+            else:
+                ax.remove()
             i += 1
 
     fig.suptitle(f"Regional {tracer} {coefficient} estimates for {subject}")
@@ -902,8 +904,10 @@ def plot_all_stare_tac_fits(
     # Original FDG testing was all done with 6 regions, so a 2-row x 3-col
     # grid was great. But with variable regions, this needs to be more
     # versatile. How should we lay out the grid?
-    n_cols = int(np.ceil(np.sqrt(tac_data.shape[1])))  # for 6, round 2.45 up to 3
+    n_cols = int(np.ceil(np.sqrt(tac_data.shape[1])))  # for 6, round 2.4 to 3
     n_rows = int(np.ceil(tac_data.shape[1] / n_cols))
+    if figsize is None:
+        figsize = ((n_cols * 3) + 2, n_rows * 3)
     fig = plt.figure(figsize=figsize, layout="tight")
     gs = gridspec.GridSpec(n_rows, n_cols, figure=fig)
     ax_handles = []
@@ -937,8 +941,8 @@ def plot_all_stare_tac_fits(
 
         # Draw each panel
         panel.set_title(
-            "Target TACs (source {})\n(fit cost {:0.5f})".format(
-                source_region, src_optimization["cost"]
+            "Target TACs (fit cost {:0.5f})\nsource {}".format(
+                src_optimization["cost"], source_region,
             )
         )
         sns.lineplot(
