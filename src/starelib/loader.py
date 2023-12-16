@@ -335,18 +335,49 @@ def gather_data(results):
     logger = results.logger
     rpt_sect = results.report.begin_section("Gather Data")
     issued_command = " ".join(sys.argv)
-
+    # Keep track of arguments we set to defaults because they weren't specified
+    implemented_defaults = []
+    calculated_paths = []
+    for arg in dir(results.args):
+        if (
+                not arg.startswith("_") and
+                arg != "subject" and
+                ("--" + arg.replace("_", "-")) not in sys.argv
+        ):
+            if "path" in arg:
+                calculated_paths.append(
+                    f"{arg} writing to '{getattr(results.args, arg)}'"
+                )
+            else:
+                implemented_defaults.append(
+                    f"{arg} set to '{getattr(results.args, arg)}'"
+                )
     logger.debug(f"{results.name} {results.report.app_version} "
                  f"is running with these arguments.")
     for k, v in vars(results.args).items():
         spaces = " " * (23 - len(k))
         logger.debug(f"  '{k}'{spaces}: {v}")
     logger.info(f"The command issued: '{issued_command}'")
-
+    for default_line in implemented_defaults:
+        logger.info(default_line)
+    for default_line in calculated_paths:
+        logger.info(default_line)
     rpt_sect.add_line("\n".join([
         "The stare_pet command executed:<br />",
         "<pre>",
         issued_command.replace("--", "\\\n--"),
+        "</pre>",
+    ]))
+    rpt_sect.add_line("\n".join([
+        "Unspecified variables were set to defaults:<br />",
+        "<pre>",
+        "\n".join(implemented_defaults),
+        "</pre>",
+    ]))
+    rpt_sect.add_line("\n".join([
+        "Default locations for paths were used:<br />",
+        "<pre>",
+        "\n".join(calculated_paths),
         "</pre>",
     ]))
 
