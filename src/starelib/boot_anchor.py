@@ -447,23 +447,24 @@ def boot_anchor(results):
         ki_fwhm[i], _x, _y = get_kde_fwhm_points(kis[:, i])
 
     # For recursive plotting fixes:
-    pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pkl"
-    with open(results.args.debug_path / pickle_name, "wb") as f:
-        pickle.dump(
-            {
-                "regional_tacs": results.corrected_tacs,
-                "good_rate_constants": good_rate_constants,
-                "kis": kis,
-                "kde_lower_bounds": kde_lower_bounds,
-                "kde_upper_bounds": kde_upper_bounds,
-                "kde_peaks": kde_peaks,
-                "kde_fwhm": kde_fwhm,
-                "ki_fwhm": ki_fwhm,
-                "uniform_tac": uniform_tac,
-                "curve_fits": good_curves_fits,
-            },
-            f
-        )
+    if results.args.debug:
+        pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pkl"
+        with open(results.args.debug_path / pickle_name, "wb") as f:
+            pickle.dump(
+                {
+                    "regional_tacs": results.corrected_tacs,
+                    "good_rate_constants": good_rate_constants,
+                    "kis": kis,
+                    "kde_lower_bounds": kde_lower_bounds,
+                    "kde_upper_bounds": kde_upper_bounds,
+                    "kde_peaks": kde_peaks,
+                    "kde_fwhm": kde_fwhm,
+                    "ki_fwhm": ki_fwhm,
+                    "uniform_tac": uniform_tac,
+                    "curve_fits": good_curves_fits,
+                },
+                f
+            )
 
     results.kde_lower_bounds = kde_lower_bounds
     results.kde_upper_bounds = kde_upper_bounds
@@ -501,13 +502,13 @@ def boot_anchor(results):
     rpt_sect.add_figure(results.args.fig_path / figure_name, caption,
                         css_class='right_fig')
 
-    rpt_sect.add_line(f"From {num_total_bootstraps} random bootstrap curves, "
+    rpt_sect.add_line(f"From {num_total_bootstraps:,} random bootstrap curves, "
                       f"{len(good_curves_fits)} good curves were found.")
 
     # Write plots to visualize the bootstrapping
     # Plot densities of each constant
-    for i, k_const in enumerate(["k1", "k2", "k3", "ki"]):
-        if k_const == "ki":
+    for i, k_const in enumerate(["K1", "k2", "k3", "Ki"]):
+        if k_const == "Ki":
             rate_consts_for_plot = kis
         else:
             rate_consts_for_plot = results.bootstrap_rate_constants[:, :, i]

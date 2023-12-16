@@ -125,8 +125,13 @@ def package_rate_constants(annealer_results, regions):
 
     final_rate_header = []
     for k in ["1", "2", "3", "i", ]:
+        # PET nomenclature has capital K for 1, i, lowercase k for 2, 3
+        if k in ["1", "i", ]:
+            letter_k = "K"
+        else:
+            letter_k = "k"
         for i, region in enumerate(regions):
-            final_rate_header.append(f"k{k}_{region}")
+            final_rate_header.append(f"{letter_k}{k}_{region}")
     final_rate_data = np.ndarray((len(regions), 4 * len(regions)))
     for i, region in enumerate(regions):
         final_rate_data[i, :] = np.concatenate(
@@ -274,7 +279,7 @@ def minimize_parameter_cost(results):
         data=np.mean(results.final_rate_df.values, axis=0).reshape(
             (4, len(results.corrected_tacs.columns))
         ).T,
-        columns=["k1", "k2", "k3", "ki"],
+        columns=["K1", "k2", "k3", "Ki"],
         index=results.corrected_tacs.columns,
     )
     final_rate_mean_df.to_csv(
