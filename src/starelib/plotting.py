@@ -12,29 +12,14 @@ from nilearn.plotting import plot_roi
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
-
+from .colors import bat_palette, freesurfer_palette
 
 # One global random number generator should be sufficient
 rng = np.random.default_rng()
 
-# Make a color palette matching Betsy's in matplotlib
-betsy_palette = {
-    "cerfullcs_c": 'blue', "fit_cerfullcs_c": 'blue',
-    "cerfullc_c": 'blue', "fit_cerfullc_c": 'blue',
-    "cerebellum": 'blue', "fit_cerebellum": 'blue',
-    "cin": 'red', "fit_cin": 'red',
-    "cingulate": 'red', "fit_cingulate": 'red',
-    "hip": 'orange', "fit_hip": 'orange',
-    "hippocampus": 'orange', "fit_hippocampus": 'orange',
-    "par": 'purple', "fit_par": 'purple',
-    "parietal": 'purple', "fit_parietal": 'purple',
-    "pph": 'green', "fit_pph": 'green',
-    "pfc": 'green', "fit_pfc": 'green',
-    "med": 'green', "fit_med": 'green',
-    "prefrontal": 'green', "fit_prefrontal": 'green',
-    "pip": 'cyan', "fit_pip": 'cyan',
-    "parahippocampal": 'cyan', "fit_parahippocampal": 'cyan',
-}
+# Make a color palette with FS colors, and matching Betsy's in matplotlib
+stare_palette = freesurfer_palette.copy()
+stare_palette.update(bat_palette)
 
 
 def palette_from_tac_regions(data):
@@ -43,10 +28,10 @@ def palette_from_tac_regions(data):
 
     palette = dict()
     for region in data.columns:
-        if region not in betsy_palette.keys():
+        if region not in stare_palette.keys():
             palette[region] = 'gray'
             palette[f"fit_{region}"] = 'gray'
-    palette.update(betsy_palette)
+    palette.update(stare_palette)
 
     return palette
 
@@ -1055,7 +1040,7 @@ def plot_ks(py_data, ml_data, title="Parameter distributions", figsize=(16, 8)):
         )
         sns.stripplot(
             data=py_data[py_data['k'] == k], x='tgt', y='value',
-            hue='src', palette=betsy_palette, s=5, ax=panel
+            hue='src', palette=stare_palette, s=5, ax=panel
         )
         # Do not plot legends on axes. Create a new legend in the spare column
         handles, labels = panel.get_legend_handles_labels()
