@@ -64,7 +64,7 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
 
     end_dt = datetime.now()
     logger.info(f"Completed MP Queue at {end_dt.strftime('%Y-%m-%d %I:%M')} "
-                f"with {rslt_queue.qsize()} ({len(results)}) results.")
+                f"with {len(results)} results.")
     for handler in logger.handlers:
         handler.flush()
 

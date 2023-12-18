@@ -27,10 +27,29 @@ def palette_from_tac_regions(data):
     """
 
     palette = dict()
+    # Every region in the data must have a color in the palette, so
+    # check to ensure we can draw something rather than error out.
+    default_color = 'gray'
     for region in data.columns:
-        if region not in stare_palette.keys():
-            palette[region] = 'gray'
-            palette[f"fit_{region}"] = 'gray'
+        color = None
+        if region in stare_palette.keys():
+            # Great! use the same color for the region's fit line
+            color = stare_palette[region]
+        else:
+            alternatives = [
+                f"Left-{region}", f"Right-{region}",
+                f"{region[:3]}-lh-{region[4:]}", f"{region[:3]}-rh-{region[4:]}"
+            ]
+            for alt in alternatives:
+                if alt in stare_palette.keys():
+                    color = stare_palette[alt]
+                    break
+        if color is None:  # still, after all that
+            color = default_color
+        # Add this region into the palette with whatever color we found for it.
+        palette[region] = color
+        palette[f"fit_{region}"] = color
+
     palette.update(stare_palette)
 
     return palette
@@ -1028,6 +1047,7 @@ def plot_ks(py_data, ml_data, title="Parameter distributions", figsize=(16, 8)):
 
     # For summarizing python data,
     py_sum_data = py_data.groupby(["tgt", "k"])['value'].mean().reset_index()
+    palette = palette_from_tac_regions(py_sum_data)
 
     for i, k in enumerate(params):
         panel = axes[i]
@@ -1044,7 +1064,7 @@ def plot_ks(py_data, ml_data, title="Parameter distributions", figsize=(16, 8)):
         )
         sns.stripplot(
             data=py_data[py_data['k'] == k], x='tgt', y='value',
-            hue='src', palette=stare_palette, s=5, ax=panel
+            hue='src', palette=palette, s=5, ax=panel
         )
         # Do not plot legends on axes. Create a new legend in the spare column
         handles, labels = panel.get_legend_handles_labels()
