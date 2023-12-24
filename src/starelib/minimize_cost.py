@@ -27,10 +27,18 @@ def cost_function(
         :param np.array boot_ki_ks_density_peak: Previously calculated kis
     """
 
-    irf, target_tac_fits, ki, ki_penalty, cost = solve_stttm(
-        x, src_idx, source_tac, uniform_tac, region_weights, weights,
-        target_tacs, boot_ki_ks_density_peak,
-    )
+    try:
+        irf, target_tac_fits, ki, ki_penalty, cost = solve_stttm(
+            x, src_idx, source_tac, uniform_tac, region_weights, weights,
+            target_tacs, boot_ki_ks_density_peak,
+        )
+    except ValueError:
+        # In the case of an irrecoverable error while solving,
+        # just return a cost so high that this non-solution can't possibly be
+        # selected as legitimate.
+        # Reasonable solutions have costs below 0.010
+        return 1.0
+
     return cost
 
 
