@@ -243,7 +243,7 @@ def get_individual_volumes(
     image_dir = Path(input_path) / subject_id / "moco"
     orig_dir = Path(output_path) / "orig"
     orig_dir.mkdir(parents=True, exist_ok=True)
-    for pattern in ["{subject}.*.MCFI.hdr", "*.nii", "*.nii.gz", ]:
+    for pattern in ["{subject}.*.hdr", "*.nii", "*.nii.gz", ]:
         actual_pattern = pattern.format(subject=subject_id)
         for i, img_file in enumerate(sorted(image_dir.glob(actual_pattern))):
             # Check for named frame numbers, just to warn about misunderstanding
@@ -559,4 +559,22 @@ def gather_data(results):
     results.volume_images = volumes
 
     rpt_sect.end()
+
+    # Check some assertions before wasting processing time
+    num_good_vols = len([v for v in volumes if v.usable])
+    if len(results.mid_times) != num_good_vols:
+        error_string = (
+            "Volumes and time points must match one-to-one, but we have kept "
+            f"{num_good_vols}/{len(volumes)} volumes to match up with "
+            f"{len(results.mid_times)}/{len(results.original_mid_times)} "
+            "time points. This error is fatal."
+        )
+        rpt_sect = results.report.begin_section("Fatal Error")
+        rpt_sect.add_line(error_string)
+        rpt_sect.end()
+        results.write_report()
+        logger.error(error_string)
+        sys.exit(1)
+    else:
+        results.write_report()
     return results
