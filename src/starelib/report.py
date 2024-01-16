@@ -181,6 +181,14 @@ class Report:
         ])
 
     def write(self, file):
+        if self._end_datetime is not None:
+            ts_str = self._end_datetime.strftime(self._dt_format)
+            fin_str = "completed"
+            verb_str = "in"
+        else:
+            ts_str = datetime.now().strftime(self._dt_format)
+            fin_str = "writing partial report"
+            verb_str = "so far took"
         total_duration = np.sum([_.duration() for _ in self.sections])
         with open(file, "w") as f:
             f.write("<!DOCTYPE html>\n")
@@ -197,8 +205,8 @@ class Report:
             for sect in sorted(self.sections, key=lambda x: x.start_time):
                 f.write(sect.html())
             f.write("<footer class='subtext'><br />STARE "
-                    f"completed {self._end_datetime.strftime(self._dt_format)},"
-                    f" in {str(total_duration).split('.', 2)[0]}."
+                    f"{fin_str} {ts_str}, {verb_str} "
+                    f"{str(total_duration).split('.', 2)[0]}."
                     "</footer>\n")
             f.write("</body>\n")
             f.write("</html>\n")
