@@ -314,7 +314,7 @@ def worker(arg_tuple):
         handler.flush()
 
     cumulative_errors = []
-    failed_bootstrap_curves = []
+    # failed_bootstrap_curves = []
     bootstrap_curve, rate_constants, exp_fit = None, None, None
     final_curve = None
     while final_curve is None:
@@ -328,7 +328,7 @@ def worker(arg_tuple):
         )
         cumulative_errors = cumulative_errors + fit_exp_errors
         if exp_fit is None:
-            failed_bootstrap_curves.append(bootstrap_curve)
+            # failed_bootstrap_curves.append(bootstrap_curve)
             continue
 
         # Third, fit the exponentials onto actual data.
@@ -342,7 +342,7 @@ def worker(arg_tuple):
         ]]
         cumulative_errors = cumulative_errors + fit_tac_errors
         if len(good_rate_constants) == 0:
-            failed_bootstrap_curves.append(bootstrap_curve)
+            # failed_bootstrap_curves.append(bootstrap_curve)
             continue
         else:
             final_curve = good_rate_constants  # triggers break from while loop
@@ -356,7 +356,7 @@ def worker(arg_tuple):
 
     return {
         "i": i,
-        "failed_bootstrap_curves": failed_bootstrap_curves,
+        # "failed_bootstrap_curves": failed_bootstrap_curves,
         "bootstrap_curve": bootstrap_curve,
         "fit_exp": exp_fit,
         "rate_constants": rate_constants,
