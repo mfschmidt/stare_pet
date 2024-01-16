@@ -316,4 +316,5 @@ def minimize_parameter_cost(results):
     )
 
     rpt_sect.end()
+    results.write_report()
     return results

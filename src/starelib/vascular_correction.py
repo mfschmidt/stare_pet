@@ -61,4 +61,5 @@ def tac_vascular_correction(results):
     results.corrected_tacs = corrected_tacs
 
     rpt_sect.end()
+    results.write_report()
     return results

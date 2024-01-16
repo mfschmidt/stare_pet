@@ -266,4 +266,5 @@ def fit_vascular_mean_tac(results):
     results.fitted_hires_tac = hires_tac
 
     rpt_sect.end()
+    results.write_report()
     return results

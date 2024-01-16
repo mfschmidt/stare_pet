@@ -559,6 +559,7 @@ def gather_data(results):
     results.volume_images = volumes
 
     rpt_sect.end()
+    results.write_report()
 
     # Check some assertions before wasting processing time
     num_good_vols = len([v for v in volumes if v.usable])

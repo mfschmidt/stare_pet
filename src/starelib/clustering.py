@@ -410,4 +410,5 @@ def two_step_cluster(results):
         results.best_vascular_mask_path[step] = best_vascular_mask_path
 
     rpt_sect.end()
+    results.write_report()
     return results

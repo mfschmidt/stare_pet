@@ -155,4 +155,5 @@ def correct_partial_volumes(results):
     )
 
     rpt_sect.end()
+    results.write_report()
     return results

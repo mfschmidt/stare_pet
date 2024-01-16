@@ -421,6 +421,7 @@ def boot_anchor(results):
         logger.error("FAILURE: No curves could be fit!!")
         rpt_sect.add_line("No curves were fit during bootstrapping!")
         rpt_sect.end()
+        results.write_report()
         return results
 
     good_rate_constants = np.asarray(
@@ -534,4 +535,5 @@ def boot_anchor(results):
             pickle.dump(results, f)
 
     rpt_sect.end()
+    results.write_report()
     return results
