@@ -293,7 +293,7 @@ def minimize_parameter_cost(results):
     final_rate_mean_df.to_csv(
         results.args.output_path /
         f"sub-{results.args.subject}_final_stare_mean_rate_constants.csv",
-        index=False
+        index=True
     )
 
     caption = "Final TACs plotted by source region"
