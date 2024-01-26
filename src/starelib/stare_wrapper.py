@@ -77,6 +77,10 @@ def get_argument_parser():
         help="Turn on to save nifti masks of all clusters, not just best"
     )
     parser.add_argument(
+        "--resample-for-clustering", action="store_true",
+        help="Down-sample the PET images for k-means clustering"
+    )
+    parser.add_argument(
         "--no-cluster-override", action="store_true",
         help="Turn on to ensure the first cluster selected is used"
     )
