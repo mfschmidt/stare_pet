@@ -116,9 +116,15 @@ class Report:
     def find_version(self):
         depth = 0
         here = Path(__file__).parent
+        self.logger.info(
+            f"Finding version, looking for setup.cfg in {str(here)}"
+        )
         while depth < 5 and not Path(here / "setup.cfg").exists():
             depth += 1
             here = here.parent
+            self.logger.info(
+                f"  Finding version, looking for setup.cfg in {str(here)}"
+            )
         if (here / "setup.cfg").exists():
             with open(here / "setup.cfg", "r") as f:
                 for line in f:
@@ -199,7 +205,7 @@ class Report:
             f.write("</head>\n")
             f.write("<body>\n")
             f.write(f"<h1>{self.title}</h1>\n")
-            f.write(f"<p class='subtext'>running {self.app_name} version "
+            f.write(f"<p class='subtext'>Running {self.app_name} version "
                     f"{self.app_version} on {platform.platform()}. "
                     f"System has {multiprocessing.cpu_count()} CPUs.</p>\n")
             for sect in sorted(self.sections, key=lambda x: x.start_time):
