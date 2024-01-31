@@ -87,7 +87,7 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
         :param numpy.array labels: The array of integer labels
         :param tuple new_shape: The new shape for the volume
         :param bool zxy: Unflatten in z, x, y order
-        :returns ndarray: The 4d image
+        :returns np.array: The 4d image
     """
 
     # This un-flattening matches the flattening above to
@@ -331,3 +331,134 @@ def to_cache(thing, cache_path, filename):
     cache_file = cache_path / filename
     with cache_file.open("wb") as f:
         pickle.dump(thing, f)
+
+
+def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
+    """Find connected blobs in array_3d"""
+
+    _voxels_in_mask = []
+    _blobs = {}
+    voxels_added_by_scan = 0
+    voxels_added_recursively = 0
+
+    def add_voxel(loc):
+        """for any voxel, find which blob it's in, then add it to the list"""
+        nonlocal voxels_added_recursively
+
+        if loc in _blobs:
+            print("false alarm")
+            return
+
+        # First pass through the searchlight, are we near an existing blob?
+        # If a nearby mask member is labeled, adopt this label
+        still_looking, current_blob_id = True, None
+        for _x in range(loc[0] - max_gap, loc[0] + max_gap + 1):
+            for _y in range(loc[1] - max_gap, loc[1] + max_gap + 1):
+                for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
+                    if (
+                            still_looking
+                            and ((_x, _y, _z) in _blobs)
+                            and (_x >= 0)
+                            and (_x < array_3d.shape[0])
+                            and (_y >= 0)
+                            and (_y < array_3d.shape[1])
+                            and (_z >= 0)
+                            and (_z < array_3d.shape[2])
+                    ):
+                        current_blob_id = _blobs[(_x, _y, _z)]
+                        # We know our blob; we can stop cycling through
+                        still_looking = False
+
+        if still_looking:
+            # No neighbors are yet recorded; this is a new blob
+            if len(_blobs) == 0:
+                max_blob = 0
+            else:
+                max_blob = np.max([v for k, v in _blobs.items()])
+            current_blob_id = max_blob + 1
+            # if verbose:
+            #     print(f" new blob, #{current_blob_id}")
+
+        # label the voxel we've been asked to add
+        _blobs[loc] = current_blob_id
+
+        # Second pass, label all in-mask voxels
+        for _x in range(loc[0] - max_gap, loc[0] + max_gap + 1):
+            for _y in range(loc[1] - max_gap, loc[1] + max_gap + 1):
+                for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
+                    try:
+                        if (
+                                ((_x, _y, _z) not in _blobs)
+                                and (array_3d[_x, _y, _z] == label)
+                                and (_x >= 0)
+                                and (_x < array_3d.shape[0])
+                                and (_y >= 0)
+                                and (_y < array_3d.shape[1])
+                                and (_z >= 0)
+                                and (_z < array_3d.shape[2])
+                        ):
+                            # _blobs[(_x, _y, _z)] = current_blob_id
+                            # This voxel is in the mask, but not yet labeled
+                            # expand outward, seeking more voxels within-blob
+                            voxels_added_recursively += 1
+                            add_voxel((_x, _y, _z))
+                    except IndexError:
+                        # No problem, we're searching beyond the array
+                        # boundaries and don't need to look here anyway
+                        voxels_added_recursively -= 1
+                        pass
+                    except RecursionError:
+                        # We got pretty deep following this voxel's trail.
+                        # Pick it up on the next one.
+                        voxels_added_recursively -= 1
+                        pass
+        return  # from add_voxel, not get_cluster_blobs
+
+    # Run through every voxel, adding it to the list if it's in the mask
+    for x in range(array_3d.shape[0]):
+        for y in range(array_3d.shape[1]):
+            for z in range(array_3d.shape[2]):
+                if array_3d[x, y, z] == label:
+                    _voxels_in_mask.append((x, y, z))
+
+    # Run through only in-mask voxels, adding them to a numbered blob.
+    # print(f"Label {label} has {len(_voxels_in_mask):,} voxels.")
+    for x, y, z in _voxels_in_mask:
+        if (x, y, z) not in _blobs:
+            voxels_added_by_scan += 1
+            # if verbose:
+            #     print(f"Adding {voxels_added_by_scan}. ({x}, {y}, {z})")
+            add_voxel((x, y, z))
+
+    # All in-mask voxels have been added,
+    # now organize them into a DataFrame for easy analyses
+    blob_data = pd.DataFrame(
+        [
+            {
+                "blob": blob,
+                "gap": max_gap,
+                "x": locus[0],
+                "y": locus[1],
+                "z": locus[2],
+            }
+            for locus, blob in _blobs.items()
+        ]
+    )
+    blob_ids, voxel_counts = np.unique(blob_data["blob"], return_counts=True)
+    if (verbose > 0) and (messages is not None):
+        messages.append(
+            f"Label {label}: {len(blob_ids):,} blobs "
+            f"with {np.mean(voxel_counts):0,.1f} voxels each"
+        )
+    if (verbose > 1) and (messages is not None):
+        messages.append(
+            f"  found {len(blob_data):,} voxels, grouped them into "
+            f"{len(blob_data['blob'].unique()):,} blobs "
+            f"with max gap of {max_gap}."
+        )
+        messages.append(
+            f"  {voxels_added_by_scan:,} voxels were added while scanning, "
+            f"{voxels_added_recursively:,} were added recursively."
+        )
+
+    return blob_data, blob_ids, voxel_counts
