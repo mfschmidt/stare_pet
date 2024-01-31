@@ -1,22 +1,28 @@
+import numpy as np
+
 from .timeactivitycurve import TimeActivityCurve
+from .util import reshape_labels_to_3d, get_cluster_blobs
 
 
 class Centroid(TimeActivityCurve):
     """ Object representation of a centroid from k-means clustering
     """
 
-    def __init__(self,
-                 activity,
-                 timepoints,
-                 label,  # should be non-zero as zero indicates background
-                 k,
-                 labels,
-                 source="",
-                 blob_count=0,
-                 voxels_per_blob=0,
-                 name=None,
-                 best_in_k=False,
-                 best_overall=False, ):
+    def __init__(
+            self,
+            activity,
+            timepoints,
+            label,  # should be non-zero as zero indicates background
+            k,
+            source="",
+            labels=None,
+            original_shape=None,
+            blob_count=0,
+            voxels_per_blob=0,
+            name=None,
+            best_in_k=False,
+            best_overall=False,
+    ):
         """ Centroid constructor """
 
         # Specified properties
@@ -24,6 +30,7 @@ class Centroid(TimeActivityCurve):
         self.label = label  # int, one of k clusters
         self.k = k  # int, how many clusters
         self.labels = labels  # ndarray shaped like (1000000,)
+        self.original_shape = original_shape
         self.best_in_k = best_in_k
         self.best_overall = best_overall
         self.source = source
@@ -47,6 +54,28 @@ class Centroid(TimeActivityCurve):
         d["blob_count"] = self.blob_count
         d["source"] = self.source
         return d
+
+    def to_3d(self):
+        if any([self.labels is None, self.original_shape is None, ]):
+            return None
+        return reshape_labels_to_3d(self.labels, self.original_shape)
+
+    def update_spatial_clusters(
+            self, labels=None, force_update=False, verbose=0, logger=None
+    ):
+        if labels is None:
+            labels = self.labels
+        message_list = []
+        if self.blob_count == 0 or force_update:
+            blob_df, blob_ids, voxel_counts = get_cluster_blobs(
+                reshape_labels_to_3d(labels, self.original_shape),
+                label=self.label, verbose=verbose, messages=message_list,
+            )
+            self.blob_count = len(blob_ids)
+            self.voxels_per_blob = np.mean(voxel_counts)
+        if logger is not None:
+            for message in message_list:
+                logger.debug(message)
 
     def description(self):
         if self.best_overall:

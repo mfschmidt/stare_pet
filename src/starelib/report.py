@@ -116,16 +116,19 @@ class Report:
     def find_version(self):
         depth = 0
         here = Path(__file__).parent
-        self.logger.info(
+        self.logger.debug(
             f"Finding version, looking for setup.cfg in {str(here)}"
         )
         while depth < 5 and not Path(here / "setup.cfg").exists():
             depth += 1
             here = here.parent
-            self.logger.info(
+            self.logger.debug(
                 f"  Finding version, looking for setup.cfg in {str(here)}"
             )
         if (here / "setup.cfg").exists():
+            self.logger.debug(
+                f"  Found config file at {str(here)}"
+            )
             with open(here / "setup.cfg", "r") as f:
                 for line in f:
                     match_name = re.match(
@@ -138,6 +141,9 @@ class Report:
                     )
                     if match_version:
                         self.app_version = match_version.group(1)
+            self.logger.debug(
+                f"  found '{self.app_name}', '{self.app_version}'."
+            )
 
     @property
     def start_time(self):

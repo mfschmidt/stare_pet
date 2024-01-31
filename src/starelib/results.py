@@ -24,7 +24,8 @@ class Results:
 
         self.report = Report(
             self._title,
-            parsed_args.output_path / f"{parsed_args.subject}_stare_report.html"
+            parsed_args.output_path / f"{parsed_args.subject}_stare_report.html",
+            self._logger,
         )
 
     @property
@@ -96,9 +97,10 @@ class Results:
 
         # Create a handler to write detailed information to a log file.
         # This handler always captures all info, debug and higher
+        # Windows cannot handle colons in filenames
         file_handler = logging.FileHandler(
             Path(self._args.output_path) /
-            f"stare_pet_{self._start_datetime}.log"
+            f"stare_pet_{self._start_datetime.strftime('%Y%m%d_%H%M%S')}.log"
         )
         file_handler.setFormatter(logging.Formatter(
             fmt="%(asctime)s : %(levelname)s : %(message)s",

@@ -2,6 +2,22 @@ from datetime import datetime
 import multiprocessing as mp
 
 
+def queue_consumer(task_q, rslt_q, pid, fxn, logger):
+    logger.debug(f"  process {pid} is alive and checking the queue.")
+    while True:
+        # Get the next set of parameters to minimize
+        msg = task_q.get()
+        if msg is None:
+            break
+        else:
+            # Save results to the result queue,
+            logger.debug(f"  process {pid} sending worker tuple "
+                         f"for region {msg[0]}...")
+            rslt_q.put(fxn(msg))
+
+    logger.debug(f"  process {pid} consumed a None and is exiting.")
+
+
 def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
     """ Execute fxn on each args tuple in list_of_args over num_cpus processes.
     """
@@ -12,21 +28,6 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
                 f"at {start_dt.strftime('%Y-%m-%d %I:%M')}")
     for handler in logger.handlers:
         handler.flush()
-
-    def queue_consumer(task_q, rslt_q, pid):
-        logger.debug(f"  process {pid} is alive and checking the queue.")
-        while True:
-            # Get the next set of parameters to minimize
-            msg = task_q.get()
-            if msg is None:
-                break
-            else:
-                # Save results to the result queue,
-                logger.debug(f"  process {pid} sending worker tuple "
-                             f"for region {msg[0]}...")
-                rslt_q.put(fxn(msg))
-
-        logger.debug(f"  process {pid} consumed a None and is exiting.")
 
     # Fill the queue with jobs
     task_queue = mp.Queue()
@@ -42,7 +43,9 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
     rslt_queue = mp.Queue()
     for proc_id in range(num_cpus):
         proc = mp.Process(
-            target=queue_consumer, args=(task_queue, rslt_queue, proc_id)
+            # name="some unique name not 'Process-1'",
+            target=queue_consumer,
+            args=(task_queue, rslt_queue, proc_id, fxn, logger)
         )
         # proc.daemon = True  # process run in background and clean up its mess
         logger.debug(f"  start process {proc_id}")

@@ -8,7 +8,9 @@
     from the command line.
 """
 
-from starelib.er176_wrapper import get_argument_parser, validate_arguments, clust_er176
+from starelib.er176_wrapper import (
+    get_argument_parser, validate_arguments, clust_er176
+)
 
 
 def main(args):
