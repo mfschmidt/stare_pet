@@ -175,7 +175,7 @@ def find_curve_fits(
     successes = []
     failures = []
     while len(successes) < success_limit and len(failures) < failure_limit:
-        np.random.seed = 42 * (len(failures) + 7)
+        np.random.seed = 42 + (len(failures) * 7)
         p0 = randomize_stacked_exponential_parameters(6)
         try:
             # Fit the data to the model, returning parameters and covariance.
@@ -274,9 +274,8 @@ def find_curve_fits(
     warnings.resetwarnings()
     warnings.filterwarnings("ignore")
     logger.info(f"Curve fitting summary: Seeking {success_limit} fits, "
-                f"and tolerating {failure_limit} failures before quitting, "
-                f"{len(failures)} failed to converge and "
-                f"{len(successes)} converged.")
+                f"and tolerating {failure_limit} failures before quitting: "
+                f"{len(successes)} converged and {len(failures)} failed to.")
 
     # In the case of success, this is a list of dicts.
     # In the case of failure, it is an empty list.

@@ -303,7 +303,7 @@ def clust_er176(args):
     best_centroid_step_2 = best_of(centroids_step_2)
     for centroid_list in [centroids_step_1, centroids_step_2, ]:
         best_atlas = save_centroid_masks(
-            centroid_list, args.output_path / "masks",
+            centroid_list, FITS, args.output_path / "masks",
             cropped_template, combined_template,
             axial_slices_to_clip=args.axial_slices_to_clip,
             verbose=args.verbose

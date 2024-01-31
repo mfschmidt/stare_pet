@@ -2,10 +2,8 @@ import numpy as np
 import logging
 from datetime import datetime
 from sklearn.cluster import KMeans
-import pandas as pd
 
 from .centroid import Centroid
-from .util import reshape_labels_to_3d
 from .mp_queues import run_in_mp_queue
 
 
@@ -81,22 +79,21 @@ def likely_peripheral(c):
     return len(c.activity) > 0
 
 
-def worker(arg_tuple):
-    """ A worker function to calculate k-means and blobs for one k
+def k_means_worker(arg_tuple):
+    """ A worker function to calculate k-means for one k
 
         This worker can be launched in a separate process to calculate k
-        clusters, and describe their centroids and characteristics in a
-        Centroid object for each cluster.
+        clusters, and save k-means results in a returnable dict.
 
     """
 
     # Workers get a single argument, so the caller must pack arguments
     # into a tuple and the worker (this function) must unpack them.
-    # This order must match exactly the order where they're packed in.
-    (k, data, features, vol_shape, mid_times, verbose) = arg_tuple
+    # This order must match exactly the order where they're packed.
+    (k, data, features, mid_times, verbose) = arg_tuple
 
     worker_start = datetime.now()
-    print(f"    Starting k-means worker for k {k} "
+    print(f"    Starting k-means worker for k={k} "
           f"at {worker_start.strftime('%m/%d %I:%M')}", flush=True)
     log_messages = []
 
@@ -116,48 +113,6 @@ def worker(arg_tuple):
         f" in {datetime.now() - worker_start}."
     )
 
-    # Count features for reporting, not necessary for execution
-    feature_counts = {"total": 0}
-    for feature_label in features.keys():
-        feature_counts[feature_label] = 0
-
-    # Find reasonable timeseries in the cluster means.
-    # count_irreversible, count_noise = 0, 0
-    centroids = []
-    for i in range(k_means.n_clusters):
-        blob_df, blob_ids, voxel_counts = get_cluster_blobs(
-            reshape_labels_to_3d(k_means.labels_, vol_shape),
-            label=i, verbose=verbose, messages=log_messages,
-        )
-        cc = k_means.cluster_centers_[i]
-        this_centroid = Centroid(
-            activity=cc,
-            timepoints=mid_times,
-            label=i + 1,  # should be non-zero as zero indicates background
-            k=k,
-            labels=k_means.labels_ + 1,
-            name=f"centroid {i + 1}/{k}",
-            source="k-means",
-            blob_count=len(blob_ids),
-            voxels_per_blob=np.mean(voxel_counts),
-        )
-        # Save features of this centroid, like whether it is
-        # noise, vascular, peripheral, etc. using functions provided.
-        for feature_label, fxn in features.items():
-            this_centroid.features[feature_label] = fxn(this_centroid)
-            if this_centroid.features[feature_label]:
-                feature_counts[feature_label] += 1
-        feature_counts["total"] += 1
-
-        centroids.append(this_centroid)
-
-    if verbose:
-        for label, count in feature_counts.items():
-            if label != "total":
-                log_messages.append(
-                    f"  {count:03d} / {feature_counts['total']:03d} are {label}"
-                )
-
     worker_end = datetime.now()
     print(f"    Finished k-means worker for k={k} "
           f"at {worker_end.strftime('%m/%d %I:%M')} "
@@ -166,14 +121,12 @@ def worker(arg_tuple):
     return {
         "k": k,
         "k_means": k_means,
-        "centroids": centroids,
         "log_messages": log_messages,
     }
 
 
 def find_centroids(
         data,
-        vol_shape,
         ks,
         features,
         mid_times=None,
@@ -188,7 +141,6 @@ def find_centroids(
     cluster.
 
     :param ndarray data: Array of timeseries
-    :param tuple vol_shape: The original 3d shape of each column vector in data
     :param iterable ks: Iterable of integers, each used as a k in k-means
     :param features: A dict of functions to assign features to centroids
     :param iterable mid_times: will be stored alongside activity in TACs
@@ -204,19 +156,60 @@ def find_centroids(
     # Do k-means clustering of timeseries for many values of k
     # from Matlab vascClust.m:112:158
     pre_k_timestamp = datetime.now()
-    k_means_fits = {}
-    all_centroids = []
     list_of_args = []
     for k in ks:
-        list_of_args.append((k, data, features, vol_shape, mid_times, verbose))
+        list_of_args.append((k, data, features, mid_times, verbose))
     # Run each tuple of arguments in a separate process to save time.
-    kmeans_results = run_in_mp_queue(
-        worker, list_of_args, num_cpus, logger
+    k_means_results = run_in_mp_queue(
+        k_means_worker, list_of_args, num_cpus, logger
     )
-    for kmeans_result in kmeans_results:
-        for centroid in kmeans_result['centroids']:
-            all_centroids.append(centroid)
-        k_means_fits[kmeans_result['k']] = kmeans_result['k_means']
+
+    # Retrieve and organize k-means results
+    k_means_fits = {}
+    all_centroids = []
+    for kmeans_result in k_means_results:
+        k = kmeans_result['k']
+        k_means_fits[k] = kmeans_result['k_means']
+
+        # Make a place to store counts while we look through clusters
+        feature_counts = {"total": 0}
+        for feature_label in features.keys():
+            feature_counts[feature_label] = 0
+
+        # Go through clusters, creating a centroid object for each one.
+        for i in range(k):
+            cc = kmeans_result['k_means'].cluster_centers_[i]
+            this_centroid = Centroid(
+                activity=cc,
+                timepoints=mid_times,
+                label=i + 1,  # should be non-zero as zero indicates background
+                k=k,
+                name=f"centroid {i + 1}/{k}",
+                source="k-means",
+                # labels=k_means.labels_ + 1,
+                # blob_count=len(blob_ids),
+                # voxels_per_blob=np.mean(voxel_counts),
+            )
+            this_centroid.features = {}
+
+            # Count features for reporting and
+            # Save features of this centroid, like whether it is
+            # noise, vascular, peripheral, etc. using functions provided.
+            for feature_label, fxn in features.items():
+                this_centroid.features[feature_label] = fxn(this_centroid)
+                if this_centroid.features[feature_label]:
+                    feature_counts[feature_label] += 1
+            feature_counts["total"] += 1
+            all_centroids.append(this_centroid)
+
+        if verbose:
+            for label, count in feature_counts.items():
+                if label != "total":
+                    kmeans_result['log_messages'].append(
+                        f"  {count:03d} / "
+                        f"{feature_counts['total']:03d} are {label}"
+                    )
+
         # Rather than logging them out of order, we pool all messages from
         # a given k, hold them, and we emit them all in one chunk here.
         logger.info(f"K-Means for {kmeans_result['k']} complete.")
@@ -271,7 +264,6 @@ def find_vascular_centroids(
     }
     all_centroids, k_means_fits = find_centroids(
         data,
-        vol_shape,
         ks,
         vascular_features,
         mid_times=mid_times,
@@ -284,6 +276,7 @@ def find_vascular_centroids(
         vascular_centroids = []
         other_centroids = []
         for centroid in [c for c in all_centroids if c.k == k]:
+            centroid.original_shape = vol_shape
             if centroid.features["likely_vascular"]:
                 vascular_centroids.append(centroid)
             else:
@@ -373,6 +366,10 @@ def find_vascular_centroids(
     # but it is only about 90% accurate in our tests. So we'll also consider
     # the next time point, but only if it has both a higher peak than our
     # current best centroid and a more spatially concise clustering.
+    if len(top_frequencies) == 0:
+        logger.error(f"None of the {len(all_centroids)} clusters appear"
+                     "vascular. There's nothing more to be done.")
+        raise TypeError("No vascular clusters available.")
     best_centroid_idx = top_indices[np.argmax(top_frequencies)]
 
     # Make a list of best-in-k centroids that peak at the same,
@@ -405,6 +402,18 @@ def find_vascular_centroids(
                 np.argmax([c.peak_value for c in centroids_with_alt_idx])
             ]
             if alt_centroid.peak_value > first_choice_centroid.peak_value:
+                # For speed, we opted not to calculate spatial clustering on
+                # every cluster; we only do this now if we want to compare them.
+                if alt_centroid.blob_count == 0:
+                    labels = k_means_fits[alt_centroid.k].labels_ + 1
+                    alt_centroid.update_spatial_clusters(
+                        labels, verbose=verbose, logger=logger,
+                    )
+                if first_choice_centroid.blob_count == 0:
+                    labels = k_means_fits[first_choice_centroid.k].labels_ + 1
+                    first_choice_centroid.update_spatial_clusters(
+                        labels, verbose=verbose, logger=logger,
+                    )
                 if alt_centroid.blob_count < first_choice_centroid.blob_count:
                     # We have an alternate centroid with a higher peak and a
                     # less spatially sparse clustering. We will use it.
@@ -440,7 +449,6 @@ def find_vascular_centroids(
 
 def find_peripheral_centroids(
         data,
-        vol_shape,
         ks,
         num_cpus=-1,
         mid_times=None,
@@ -454,7 +462,6 @@ def find_peripheral_centroids(
     cluster.
 
     :param ndarray data: Array of timeseries
-    :param tuple vol_shape: The original 3d shape of each column vector in data
     :param iterable ks: Iterable of integers, each used as a k in k-means
     :param int num_cpus: How many processes to use finding centroids
     :param iterable mid_times: will be stored alongside activity in TACs
@@ -473,7 +480,6 @@ def find_peripheral_centroids(
     }
     all_centroids, k_means_fits = find_centroids(
         data,
-        vol_shape,
         ks,
         vascular_features,
         mid_times=mid_times,
@@ -554,134 +560,3 @@ def find_peripheral_centroids(
 
     # Return a list of all centroids, with the best labelled as such.
     return all_centroids, k_means_fits
-
-
-def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
-    """Find connected blobs in array_3d"""
-
-    _voxels_in_mask = []
-    _blobs = {}
-    voxels_added_by_scan = 0
-    voxels_added_recursively = 0
-
-    def add_voxel(loc):
-        """for any voxel, find which blob it's in, then add it to the list"""
-        nonlocal voxels_added_recursively
-
-        if loc in _blobs:
-            print("false alarm")
-            return
-
-        # First pass through the searchlight, are we near an existing blob?
-        # If a nearby mask member is labeled, adopt this label
-        still_looking, current_blob_id = True, None
-        for _x in range(loc[0] - max_gap, loc[0] + max_gap + 1):
-            for _y in range(loc[1] - max_gap, loc[1] + max_gap + 1):
-                for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
-                    if (
-                            still_looking
-                            and ((_x, _y, _z) in _blobs)
-                            and (_x >= 0)
-                            and (_x < array_3d.shape[0])
-                            and (_y >= 0)
-                            and (_y < array_3d.shape[1])
-                            and (_z >= 0)
-                            and (_z < array_3d.shape[2])
-                    ):
-                        current_blob_id = _blobs[(_x, _y, _z)]
-                        # We know our blob; we can stop cycling through
-                        still_looking = False
-
-        if still_looking:
-            # No neighbors are yet recorded; this is a new blob
-            if len(_blobs) == 0:
-                max_blob = 0
-            else:
-                max_blob = np.max([v for k, v in _blobs.items()])
-            current_blob_id = max_blob + 1
-            # if verbose:
-            #     print(f" new blob, #{current_blob_id}")
-
-        # label the voxel we've been asked to add
-        _blobs[loc] = current_blob_id
-
-        # Second pass, label all in-mask voxels
-        for _x in range(loc[0] - max_gap, loc[0] + max_gap + 1):
-            for _y in range(loc[1] - max_gap, loc[1] + max_gap + 1):
-                for _z in range(loc[2] - max_gap, loc[2] + max_gap + 1):
-                    try:
-                        if (
-                                ((_x, _y, _z) not in _blobs)
-                                and (array_3d[_x, _y, _z] == label)
-                                and (_x >= 0)
-                                and (_x < array_3d.shape[0])
-                                and (_y >= 0)
-                                and (_y < array_3d.shape[1])
-                                and (_z >= 0)
-                                and (_z < array_3d.shape[2])
-                        ):
-                            # _blobs[(_x, _y, _z)] = current_blob_id
-                            # This voxel is in the mask, but not yet labeled
-                            # expand outward, seeking more voxels within-blob
-                            voxels_added_recursively += 1
-                            add_voxel((_x, _y, _z))
-                    except IndexError:
-                        # No problem, we're searching beyond the array
-                        # boundaries and don't need to look here anyway
-                        voxels_added_recursively -= 1
-                        pass
-                    except RecursionError:
-                        # We got pretty deep following this voxel's trail.
-                        # Pick it up on the next one.
-                        voxels_added_recursively -= 1
-                        pass
-        return  # from add_voxel, not get_cluster_blobs
-
-    # Run through every voxel, adding it to the list if it's in the mask
-    for x in range(array_3d.shape[0]):
-        for y in range(array_3d.shape[1]):
-            for z in range(array_3d.shape[2]):
-                if array_3d[x, y, z] == label:
-                    _voxels_in_mask.append((x, y, z))
-
-    # Run through only in-mask voxels, adding them to a numbered blob.
-    # print(f"Label {label} has {len(_voxels_in_mask):,} voxels.")
-    for x, y, z in _voxels_in_mask:
-        if (x, y, z) not in _blobs:
-            voxels_added_by_scan += 1
-            # if verbose:
-            #     print(f"Adding {voxels_added_by_scan}. ({x}, {y}, {z})")
-            add_voxel((x, y, z))
-
-    # All in-mask voxels have been added,
-    # now organize them into a DataFrame for easy analyses
-    blob_data = pd.DataFrame(
-        [
-            {
-                "blob": blob,
-                "gap": max_gap,
-                "x": locus[0],
-                "y": locus[1],
-                "z": locus[2],
-            }
-            for locus, blob in _blobs.items()
-        ]
-    )
-    blob_ids, voxel_counts = np.unique(blob_data["blob"], return_counts=True)
-    if (verbose > 0) and (messages is not None):
-        messages.append(
-            f"Label {label}: {len(blob_ids):,} blobs "
-            f"with {np.mean(voxel_counts):0,.1f} voxels each"
-        )
-    if (verbose > 1) and (messages is not None):
-        messages.append(
-            f"  found {len(blob_data):,} voxels, grouped them into "
-            f"{len(blob_data['blob'].unique()):,} blobs "
-            f"with max gap of {max_gap}."
-        )
-        messages.append(
-            f"  {voxels_added_by_scan:,} voxels were added while scanning, "
-            f"{voxels_added_recursively:,} were added recursively."
-        )
-
-    return blob_data, blob_ids, voxel_counts

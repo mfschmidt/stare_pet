@@ -17,8 +17,9 @@ from .centroid_heuristics import likely_irreversible_linear
 
 
 def make_atlas_and_mask(
-        centroid, template_img,
-        pad_inferior=0, out_path=None, file_desc=None, logger=None
+        centroid, labels, template_img,
+        pad_inferior=0, out_path=None, file_desc=None, logger=None,
+        resample_to_template=False,
 ):
     """ Save a centroid's cluster as a mask.
 
@@ -27,7 +28,8 @@ def make_atlas_and_mask(
         this version of stare_pet, each mask may or may not overlay
         the original PET image correctly.
 
-    :param Centroid centroid: A Centroid object with label data
+    :param Centroid centroid: A Centroid object
+    :param array labels: Array of labels, some matching the centroid label
     :param Nifti1Image template_img: Image to use as a template for mask data
     :param int pad_inferior: Add this number of axial slices to the inferior
                              edge of the volume, for reversing the crop
@@ -35,6 +37,7 @@ def make_atlas_and_mask(
                           By default, these are not written to disk
     :param str file_desc: If provided, filename is overridden
     :param logging.logger logger: If provided, write output to this logger
+    :param resample_to_template: If true, resample 3D matrix to template_img
     :return: paths to atlas image and mask image
     """
 
@@ -42,10 +45,15 @@ def make_atlas_and_mask(
 
     # Shape the voxel labels into a 3d matrix to match the template image.
     cluster_atlas_data = reshape_labels_to_3d(
-        centroid.labels,
+        labels,
         (template_img.shape[0], template_img.shape[1],
          template_img.shape[2] - pad_inferior)
     )
+    if resample_to_template:
+        cluster_atlas_data = image.resample_img(
+            cluster_atlas_data, target_affine=template_img.affine,
+            interpolation='nearest'
+        ).get_fdata()
 
     # If requested, add back the cropped axial slices
     if pad_inferior > 0:
@@ -106,19 +114,24 @@ def best_of(centroids):
             return centroid
 
 
-def save_centroid_masks(centroids, mask_output_path,
+def save_centroid_masks(centroids, fits, mask_output_path,
                         current_template, original_template,
+                        resample_to_template=False,
                         step=0, axial_slices_to_clip=0, verbose=0,
+                        save_all=False,
                         logger=None):
     """ Save centroid masks to disk, return the best one
 
         :param list centroids: list of Centroid objects to write to disk
+        :param dict fits: k-means fit results for extracting labels
         :param Path mask_output_path: The path for writing out masks
         :param Nifti1Image current_template: An image in cropped cluster space
         :param Nifti1Image original_template: An image in original space
+        :param bool resample_to_template: Resample clusters to original space
         :param int step: which step generated this mask
         :param int axial_slices_to_clip: how many axial slices to remove
         :param int verbose: higher numbers indicate more verbosity
+        :param bool save_all: If true, save niftis for every cluster mask
         :param logging.logger logger: write output to logger if available
 
         :return nibabel.Nifti1Image: the best atlas image, in original space
@@ -132,26 +145,32 @@ def save_centroid_masks(centroids, mask_output_path,
             # Write the best atlas and mask to disk regardless of verbosity.
             # Specifying out_path causes masks to be written to disk.
             best_atlas_path, best_mask_path = make_atlas_and_mask(
-                centroid, current_template,
+                centroid, fits[step][centroid.k].labels_ + 1,
+                current_template,
                 out_path=mask_output_path,
                 file_desc=f"step-{step}_best",
+                resample_to_template=resample_to_template,
                 logger=logger,
             )
             # Add back the cropped axial slices and save image in original space
             if axial_slices_to_clip > 0:
                 best_atlas_path, best_mask_path = make_atlas_and_mask(
-                    centroid, original_template,
+                    centroid, fits[step][centroid.k].labels_ + 1,
+                    original_template,
                     pad_inferior=axial_slices_to_clip,
                     out_path=mask_output_path, file_desc=f"step-{step}_best",
+                    resample_to_template=resample_to_template,
                     logger=logger,
                 )
-        if verbose > 2:  # for all centroids, not just the best one
+        if verbose > 2 or save_all:  # for all centroids, not just the best one
             # Specifying out_path causes masks to be written to disk.
             # Write EVERY cluster to disk for future debugging
             if (mask_output_path.parent / "debug").exists():
                 make_atlas_and_mask(
-                    centroid, current_template,
+                    centroid, fits[step][centroid.k].labels_ + 1,
+                    current_template,
                     out_path=mask_output_path.parent / "debug",
+                    resample_to_template=resample_to_template,
                     logger=logger,
                 )
 
@@ -179,7 +198,11 @@ def tabulate_centroids(centroids, added_columns=None):
     return df
 
 
-def cluster(results, cluster_function, data, ks, step):
+def load_or_calculate_clusters(
+        results, cluster_function, source_data, ks, step, source_shape=None
+):
+    """ Treat data as either 4D Nifti1Image or 2D array """
+
     # If prior models were saved to disk, load them rather than running.
     cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
         results.args.subject, step
@@ -187,20 +210,32 @@ def cluster(results, cluster_function, data, ks, step):
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    vol_shape = results.cropped_4D.shape[:3]
     if cached_data is None:
+        # Interpret either Nifti1Image or numpy ndarray as input data
+        if isinstance(source_data, nib.Nifti1Image):
+            source_shape = source_data.shape
+            data = flatten_4d_to_2d(source_data.get_fdata(), zxy=True)
+        else:
+            data = source_data
+            if source_shape is None:
+                raise ValueError(
+                    "The shape of the source data is required. "
+                    "With non-image data, it cannot be calculated."
+                )
+
         centroids, model_fits = cluster_function(
-            data, vol_shape, ks,
+            data, source_shape[:3], ks,
             allow_override=(not results.args.no_cluster_override),
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             verbose=results.args.verbose
         )
         to_cache(
-            (centroids, model_fits), results.args.cache_path, cache_file
+            (data, centroids, model_fits),
+            results.args.cache_path, cache_file
         )
     else:
-        (centroids, model_fits) = cached_data
+        (data, centroids, model_fits) = cached_data
         results.logger.info(f"  loaded cached step {step} k-means to save time")
 
     # Label the best centroid for proper figure legend
@@ -211,7 +246,34 @@ def cluster(results, cluster_function, data, ks, step):
     results.cluster_centroids[step] = centroids
     results.cluster_model_fits[step] = model_fits
 
-    return centroids, model_fits
+    return data, centroids, model_fits
+
+
+def save_table_of_centroid_stats(results, step):
+    """ Tabulate centroid stats and save them to a csv file. """
+
+    for c in results.cluster_centroids[step]:
+        m1, b1 = likely_irreversible_linear(
+            c, return_features=True, skip_t0=False
+        )
+        c.features["line_whole"] = {"slope": m1, "intercept": b1}
+        m2, b2 = likely_irreversible_linear(
+            c, return_features=True, skip_t0=True
+        )
+        c.features["line_wo_first"] = {"slope": m2, "intercept": b2}
+    # And now, build the table and write it with other results.
+    centroid_table = pd.concat([
+        tabulate_centroids(
+            results.cluster_centroids[step],
+            added_columns={'subject': results.args.subject, 'step': step},
+        ),
+    ], axis=0).reset_index(drop=True)
+    filename = f"sub-{results.args.subject}_vasc_clust_step-{step}_metadata.csv"
+    # Order columns so subject and step are first
+    cols = [c for c in centroid_table.columns if c not in ['subject', 'step']]
+    centroid_table[['subject', 'step', ] + cols].to_csv(
+        results.args.debug_path / filename, index=False, float_format='%0.5f'
+    )
 
 
 def two_step_cluster(results):
@@ -247,8 +309,15 @@ def two_step_cluster(results):
     #         and combine them into a 4D image.
     # -------------------------------------------------------------------------
 
-    # We need a timeseries vector at each voxel.
-    to_cluster = flatten_4d_to_2d(results.cropped_4D.get_fdata(), zxy=True)
+    # Some higher-resolution images are difficult to cluster, and take forever,
+    # so they perform better down-sampled. The cluster masks will be up-sampled
+    # back to original resolution after k-means.
+    if results.args.resample_for_clustering:
+        src_img = image.resample_img(
+            results.cropped_4D, target_affine=np.diag((2, 2, 2))
+        )
+    else:
+        src_img = results.cropped_4D
 
     # -------------------------------------------------------------------------
     # Step 1. Find the best candidate for a vascular cluster of voxels.
@@ -256,8 +325,11 @@ def two_step_cluster(results):
     #         and selects the best cluster
     # -------------------------------------------------------------------------
 
-    cluster(results, cluster_function, to_cluster, step_one_ks, 1)
+    two_d_data, centroids, model_fits = load_or_calculate_clusters(
+        results, cluster_function, src_img, step_one_ks, 1
+    )
     rpt_sect.add_line(str(best_of(results.cluster_centroids[1])))
+    save_table_of_centroid_stats(results, 1)
 
     # -------------------------------------------------------------------------
     # Step 2. Find the best candidate from step 1 for a vascular cluster of
@@ -273,45 +345,20 @@ def two_step_cluster(results):
     # NEW Nifti1 space, not the original SpmAnalyze space.
 
     # Generate the masked data, with only the best centroid's data from step 1.
-    top_centroid_masked_data = np.zeros(to_cluster.shape, )
+    top_centroid_masked_data = np.zeros(two_d_data.shape, )
     best_centroid_step_1 = best_of(results.cluster_centroids[1])
-    top_cluster_mask = best_centroid_step_1.labels == best_centroid_step_1.label
-    top_centroid_masked_data[top_cluster_mask] = to_cluster[top_cluster_mask, :]
+    labels = model_fits[best_centroid_step_1.k].labels_
+    top_cluster_mask = (labels == best_centroid_step_1.label)
+    top_centroid_masked_data[top_cluster_mask] = two_d_data[top_cluster_mask, :]
 
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
-    cluster(results, cluster_function, top_centroid_masked_data, step_two_ks, 2)
-    rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
-
-    # Output a table of all centroids with their features and slopes
-    # We need to get slopes and intercepts for centroids first
-    for step in [1, 2]:
-        for c in results.cluster_centroids[step]:
-            m1, b1 = likely_irreversible_linear(
-                c, return_features=True, skip_t0=False
-            )
-            c.features["line_whole"] = {"slope": m1, "intercept": b1}
-            m2, b2 = likely_irreversible_linear(
-                c, return_features=True, skip_t0=True
-            )
-            c.features["line_wo_first"] = {"slope": m2, "intercept": b2}
-    # And now, build the table and write it with other results.
-    centroid_table = pd.concat([
-        tabulate_centroids(
-            results.cluster_centroids[1],
-            added_columns={'subject': results.args.subject, 'step': 1},
-        ),
-        tabulate_centroids(
-            results.cluster_centroids[2],
-            added_columns={'subject': results.args.subject, 'step': 2},
-        ),
-    ], axis=0).reset_index(drop=True)
-    filename = f"sub-{results.args.subject}_vascular_cluster_metadata.csv"
-    # Order columns so subject and step are first
-    cols = [c for c in centroid_table.columns if c not in ['subject', 'step']]
-    centroid_table[['subject', 'step', ] + cols].to_csv(
-        results.args.debug_path / filename, index=False, float_format='%0.5f'
+    two_d_data, centroids, model_fits = load_or_calculate_clusters(
+        results, cluster_function, top_centroid_masked_data,
+        step_two_ks, 2, source_shape=src_img.shape,
     )
+    rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
+    save_table_of_centroid_stats(results, 2)
 
     # Plot the top centroids over PET data, and add it to the report.
     pet_avg_img = image.mean_img(results.cropped_4D)
@@ -319,7 +366,8 @@ def two_step_cluster(results):
     for step in [1, 2]:
         best_cs[step] = best_of(results.cluster_centroids[step])
         best_atlases[step], best_masks[step] = make_atlas_and_mask(
-            best_cs[step], pet_avg_img
+            best_cs[step], labels, pet_avg_img,
+            resample_to_template=results.args.resample_for_clustering,
         )
 
     top_centroid_fig = plot_top_centroids_atlas(
@@ -368,7 +416,10 @@ def two_step_cluster(results):
             # For debugging, draw all masks on the average PET
             for c in results.cluster_centroids[step]:
                 c_fig = plot_top_centroids_atlas(
-                    make_atlas_and_mask(c, pet_avg_img)[1],
+                    make_atlas_and_mask(
+                        c, labels, pet_avg_img,
+                        resample_to_template=results.args.resample_for_clustering,
+                    )[1],
                     None,
                     pet_avg_img,
                     title="\n".join([
@@ -399,12 +450,14 @@ def two_step_cluster(results):
         # Save out nifti masks (which ones conditional on verbosity)
         best_vascular_mask_path = save_centroid_masks(
             results.cluster_centroids[step],
+            results.cluster_model_fits,
             results.args.output_path / "masks",
             results.cropped_4D.slicer[:, :, :, 0],
             results.input_4D.slicer[:, :, :, 0],
             step=step,
             axial_slices_to_clip=results.args.axial_slices_to_clip,
             verbose=results.args.verbose,
+            save_all=results.args.save_all_cluster_masks,
             logger=logger,
         )
         results.best_vascular_mask_path[step] = best_vascular_mask_path
