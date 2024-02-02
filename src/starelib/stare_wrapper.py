@@ -73,12 +73,16 @@ def get_argument_parser():
         help="How many iterations should the annealer be capped at?"
     )
     parser.add_argument(
-        "--save-all-cluster-masks", action="store_true",
-        help="Turn on to save nifti masks of all clusters, not just best"
+        "--resample-for-clustering", type=str, default="",
+        help="Down-sample the PET images for k-means clustering. "
+             "'x2' down-samples by halving in each dimension. "
+             "'2mm' resamples to a resolution of 2mm isotropic. "
+             "'3mm' resamples to a resolution of 3mm isotropic. "
+             "'4mm' resamples to a resolution of 4mm isotropic."
     )
     parser.add_argument(
-        "--resample-for-clustering", action="store_true",
-        help="Down-sample the PET images for k-means clustering"
+        "--save-all-cluster-masks", action="store_true",
+        help="Turn on to save nifti masks of all clusters, not just best"
     )
     parser.add_argument(
         "--no-cluster-override", action="store_true",
@@ -190,7 +194,7 @@ def validate_arguments(args):
     if args.num_cpus == "":
         setattr(args, "num_cpus", 1)
     elif args.num_cpus == "max":
-        setattr(args, "num_cpus", cpu_count())
+        setattr(args, "num_cpus", int(cpu_count()))
     else:
         if int(args.num_cpus) > cpu_count():
             setattr(args, "num_cpus", int(cpu_count()))
