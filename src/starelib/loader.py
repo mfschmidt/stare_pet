@@ -445,7 +445,7 @@ def gather_data(results):
     combined_image, volumes = None, None
 
     # The first preference is if there is already a cached 4D image.
-    cached_img_file = args.output_path / f"{args.subject}_orig_4d.nii.gz"
+    cached_img_file = args.output_path / f"sub-{args.subject}_orig_4d.nii.gz"
     if combined_image is None and cached_img_file.exists():
         # If the image was cached, it was cached without the ignored frames
         combined_image, volumes = get_4D_data(
@@ -484,7 +484,7 @@ def gather_data(results):
         # Collect all the 3d image data into a single 4d structure.
         alerts = []
         combined_image = combine_volumes_into_4d(
-            volumes, args.output_path / f"{args.subject}_orig_4d.nii.gz",
+            volumes, args.output_path / f"sub-{args.subject}_orig_4d.nii.gz",
             alerts=alerts, logger=logger
         )
         rpt_sect.add_line(f"Loaded PET data from {len(moco_images)} moco files."
@@ -513,7 +513,7 @@ def gather_data(results):
     )
     mean_image.header.set_xyzt_units("mm", "sec")
     nib.save(mean_image,
-             args.output_path / f"{args.subject}_orig_mean.nii.gz")
+             args.output_path / f"sub-{args.subject}_orig_mean.nii.gz")
 
     # Handle ignored frames, keeping both an original and a modified
     if len(args.ignore_frames) > 0:
@@ -534,8 +534,8 @@ def gather_data(results):
     # The header is updated along with the data.
     cropped_image = cropped_image.slicer[:, :, args.axial_slices_to_clip:, :]
     nib.save(cropped_image,
-             args.output_path / f"{args.subject}_cropped_4d.nii.gz")
-    logger.debug(f"WROTE {args.subject}_cropped_4d.nii.gz "
+             args.output_path / f"sub-{args.subject}_cropped_4d.nii.gz")
+    logger.debug(f"WROTE sub-{args.subject}_cropped_4d.nii.gz "
                  f"({cropped_image.shape}) to {str(args.output_path)}")
     rpt_sect.add_line(f"Cropped {args.axial_slices_to_clip} slices from "
                       "the inferior of each PET volume taking them to "
@@ -551,7 +551,7 @@ def gather_data(results):
     )
     mean_mci_image.header.set_xyzt_units("mm", "sec")
     nib.save(mean_mci_image,
-             args.output_path / f"{args.subject}_cropped_mean.nii.gz")
+             args.output_path / f"sub-{args.subject}_cropped_mean.nii.gz")
 
     # Store the relevant data to results object.
     results.input_4D = combined_image
