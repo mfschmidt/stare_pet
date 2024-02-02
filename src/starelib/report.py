@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import numpy as np
@@ -34,7 +34,7 @@ class Section:
 
     def duration(self):
         if self._start_datetime is None or self._end_datetime is None:
-            return 0
+            return timedelta(0)
         else:
             return self._end_datetime - self._start_datetime
 
