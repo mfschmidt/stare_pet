@@ -201,6 +201,10 @@ def validate_arguments(args):
         else:
             setattr(args, "num_cpus", int(args.num_cpus))
 
+    # Anything indicating not to resample should make this an empty string.
+    if args.resample_for_clustering in ["none", "orig", "", ]:
+        setattr(args, "resample_for_clustering", "")
+
     # Report the problems and quit if we have fatal errors.
     if len(errors) > 0:
         for error in errors:
