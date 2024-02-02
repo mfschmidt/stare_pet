@@ -90,7 +90,7 @@ def k_means_worker(arg_tuple):
     # Workers get a single argument, so the caller must pack arguments
     # into a tuple and the worker (this function) must unpack them.
     # This order must match exactly the order where they're packed.
-    (k, data, features, mid_times, verbose) = arg_tuple
+    (k, data, verbose) = arg_tuple
 
     worker_start = datetime.now()
     print(f"    Starting k-means worker for k={k} "
@@ -130,7 +130,7 @@ def find_centroids(
         ks,
         features,
         mid_times=None,
-        num_cpus=-1,
+        num_cpus=1,
         verbose=0,
         logger=None,
 ):
@@ -152,14 +152,16 @@ def find_centroids(
     """
 
     logger = logging.getLogger("STARE") if logger is None else logger
+    print(f"Setting up {len(ks)} K-means values across {num_cpus} cpus.")
 
     # Do k-means clustering of timeseries for many values of k
     # from Matlab vascClust.m:112:158
     pre_k_timestamp = datetime.now()
     list_of_args = []
     for k in ks:
-        list_of_args.append((k, data, features, mid_times, verbose))
+        list_of_args.append((k, data, verbose))
     # Run each tuple of arguments in a separate process to save time.
+
     k_means_results = run_in_mp_queue(
         k_means_worker, list_of_args, num_cpus, logger
     )
@@ -212,7 +214,7 @@ def find_centroids(
 
         # Rather than logging them out of order, we pool all messages from
         # a given k, hold them, and we emit them all in one chunk here.
-        logger.info(f"K-Means for {kmeans_result['k']} complete.")
+        logger.info(f" - K-Means for {kmeans_result['k']} complete.")
         for message in kmeans_result['log_messages']:
             logger.info(message)
 
@@ -227,11 +229,10 @@ def find_centroids(
 
 def find_vascular_centroids(
         data,
-        vol_shape,
         ks,
         allow_override=True,
         mid_times=None,
-        num_cpus=-1,
+        num_cpus=1,
         verbose=0,
         logger=None,
 ):
@@ -242,7 +243,6 @@ def find_vascular_centroids(
     cluster.
 
     :param ndarray data: Array of timeseries
-    :param tuple vol_shape: The original 3d shape of each column vector in data
     :param iterable ks: Iterable of integers, each used as a k in k-means
     :param bool allow_override: Check for a higher cluster one t later
     :param iterable mid_times: will be stored alongside activity in TACs
@@ -276,7 +276,6 @@ def find_vascular_centroids(
         vascular_centroids = []
         other_centroids = []
         for centroid in [c for c in all_centroids if c.k == k]:
-            centroid.original_shape = vol_shape
             if centroid.features["likely_vascular"]:
                 vascular_centroids.append(centroid)
             else:
@@ -367,7 +366,7 @@ def find_vascular_centroids(
     # the next time point, but only if it has both a higher peak than our
     # current best centroid and a more spatially concise clustering.
     if len(top_frequencies) == 0:
-        logger.error(f"None of the {len(all_centroids)} clusters appear"
+        logger.error(f"None of the {len(all_centroids)} clusters appear "
                      "vascular. There's nothing more to be done.")
         raise TypeError("No vascular clusters available.")
     best_centroid_idx = top_indices[np.argmax(top_frequencies)]
@@ -450,7 +449,7 @@ def find_vascular_centroids(
 def find_peripheral_centroids(
         data,
         ks,
-        num_cpus=-1,
+        num_cpus=1,
         mid_times=None,
         verbose=0,
         logger=None,
