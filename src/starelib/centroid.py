@@ -78,19 +78,29 @@ class Centroid(TimeActivityCurve):
                 logger.debug(message)
 
     def description(self):
+        # Determine whether centroid's rank merits asterisks
         if self.best_overall:
             asterisks = " (**)"
         elif self.best_in_k:
             asterisks = " (*)"
         else:
             asterisks = ""
-        d = "{}: peak={:0.4f} @ t={}/{}, {:d} blobs w/~{} voxels each{}".format(
+
+        # Determine whether spatial analysis has been done
+        if self.blob_count == 0:
+            blob_str = "no sparsity data"
+        else:
+            blob_str = "{:d} blobs w/~{} voxels each".format(
+                int(self.blob_count), int(self.voxels_per_blob)
+            )
+
+        # Return description of centroid
+        d = "{}: peak={:0.4f} @ t={}/{}, {}{}".format(
             self.name,
             self.peak_value,
             int(self.peak_index + 1),
             len(self.timepoints),
-            int(self.blob_count),
-            int(self.voxels_per_blob),
+            blob_str,
             asterisks
         )
         return d
