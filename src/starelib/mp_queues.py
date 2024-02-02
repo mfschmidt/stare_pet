@@ -15,7 +15,7 @@ def queue_consumer(task_q, rslt_q, pid, fxn, logger):
                          f"for region {msg[0]}...")
             rslt_q.put(fxn(msg))
 
-    logger.debug(f"  process {pid} consumed a None and is exiting.")
+    logger.debug(f"  process {pid} found an empty queue and is exiting.")
 
 
 def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
