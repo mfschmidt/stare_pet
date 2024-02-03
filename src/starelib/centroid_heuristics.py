@@ -152,7 +152,7 @@ def find_centroids(
     """
 
     logger = logging.getLogger("STARE") if logger is None else logger
-    print(f"Setting up {len(ks)} K-means values across {num_cpus} cpus.")
+    logger.info(f"Setting up {len(ks)} K-means values across {num_cpus} cpus.")
 
     # Do k-means clustering of timeseries for many values of k
     # from Matlab vascClust.m:112:158
@@ -382,60 +382,6 @@ def find_vascular_centroids(
     ]
     best_centroid = first_choice_centroid
 
-    # We probably have the best centroid, but if the next time point contains
-    # a centroid with a higher value AND a more spatially concise clustering,
-    # we should consider the runner-up time point a better bet. Even if that
-    # centroid was not 'best_in_k', because 'best_in_k' was also
-    # restricted to this same earliest peak. We explicitly want to see
-    # if the peak being too early caused us to miss a better option here.
-    if allow_override:
-        alt_centroid_idx = best_centroid_idx + 1
-        centroids_with_alt_idx = [
-            c for c in all_centroids
-            if ((c.peak_index == alt_centroid_idx) &
-                (c.features['likely_vascular']))
-        ]
-        # Of those centroids peaking together, which one peaks highest?
-        if len(centroids_with_alt_idx) > 0:
-            alt_centroid = centroids_with_alt_idx[
-                np.argmax([c.peak_value for c in centroids_with_alt_idx])
-            ]
-            if alt_centroid.peak_value > first_choice_centroid.peak_value:
-                # For speed, we opted not to calculate spatial clustering on
-                # every cluster; we only do this now if we want to compare them.
-                if alt_centroid.blob_count == 0:
-                    labels = k_means_fits[alt_centroid.k].labels_ + 1
-                    alt_centroid.update_spatial_clusters(
-                        labels, verbose=verbose, logger=logger,
-                    )
-                if first_choice_centroid.blob_count == 0:
-                    labels = k_means_fits[first_choice_centroid.k].labels_ + 1
-                    first_choice_centroid.update_spatial_clusters(
-                        labels, verbose=verbose, logger=logger,
-                    )
-                if alt_centroid.blob_count < first_choice_centroid.blob_count:
-                    # We have an alternate centroid with a higher peak and a
-                    # less spatially sparse clustering. We will use it.
-                    logger.info(
-                        f"Overriding the cluster selection with an alternate!!"
-                        f" original best {first_choice_centroid.description()};"
-                        f" new best is {alt_centroid.description()}."
-                    )
-                    best_centroid.source = ", ".join([
-                        best_centroid.source, "original best, overridden"
-                    ])
-                    alt_centroid.source = ", ".join([
-                        alt_centroid.source, "overrides first choice"
-                    ])
-                    best_centroid = alt_centroid
-                else:
-                    logger.info(f"An alternate, {alt_centroid.description()}, "
-                                "was considered and dropped.")
-            else:
-                logger.info("No alternate centroids had higher peaks.")
-        else:
-            logger.info("No alternate centroids were considered.")
-
     # Label the centroid with the highest peak value
     best_centroid.best_overall = True
     logger.info(
@@ -444,6 +390,93 @@ def find_vascular_centroids(
 
     # Return a list of all centroids, with the best labelled as such.
     return all_centroids, k_means_fits
+
+
+def consider_alternate_clusters(
+        all_centroids, k_means_fits, source_4d_image, verbose=0, logger=None
+):
+    """ After selecting the best cluster, look again for a better alternate.
+
+        We probably have the best centroid, but if the next time point contains
+        a centroid with a higher value AND a more spatially concise clustering,
+        we should consider the runner-up time point a better bet. Even if that
+        centroid was not 'best_in_k', because 'best_in_k' was also
+        restricted to this same earliest peak. We explicitly want to see
+        if the peak being too early caused us to miss a better option here.
+
+        :param list all_centroids: List of centroids
+        :param list k_means_fits: List of fitted K-means calculations
+        :param Nifti1Image source_4d_image: The image used to compute the KMeans
+        :param int verbose: How verbose should we be with our output?
+        :param logger: Logger instance
+        :return: True if we changed the best cluster, False otherwise
+
+    """
+
+    logger = logging.getLogger("STARE") if logger is None else logger
+
+    # Before beginning, locate the current selection of "best" centroid
+    first_choice_centroid = None
+    for c in all_centroids:
+        c.original_shape = source_4d_image.shape
+        if c.best_overall:
+            first_choice_centroid = c
+    if first_choice_centroid is None:
+        raise ValueError("No centroid is selected as 'best'.")
+
+    # The best centroid has the highest peak out of all centroids peaking
+    # at the same, earliest time. For candidates to replace it,
+    # only consider peaks at one time point later.
+    centroids_with_alt_idx = [
+        c for c in all_centroids
+        if ((c.peak_index == first_choice_centroid.peak_index + 1) &
+            (c.features['likely_vascular']))
+    ]
+
+    # Of those centroids peaking together, which one peaks highest?
+    if len(centroids_with_alt_idx) > 0:
+        alt_centroid = centroids_with_alt_idx[
+            np.argmax([c.peak_value for c in centroids_with_alt_idx])
+        ]
+        if alt_centroid.peak_value > first_choice_centroid.peak_value:
+            # For speed, we opted not to calculate spatial clustering on
+            # every cluster; but we must do this now if we want to compare them.
+            if alt_centroid.blob_count == 0:
+                labels = k_means_fits[alt_centroid.k].labels_ + 1
+                alt_centroid.update_spatial_clusters(
+                    labels, verbose=verbose, logger=logger,
+                )
+            if first_choice_centroid.blob_count == 0:
+                labels = k_means_fits[first_choice_centroid.k].labels_ + 1
+                first_choice_centroid.update_spatial_clusters(
+                    labels, verbose=verbose, logger=logger,
+                )
+            if alt_centroid.blob_count < first_choice_centroid.blob_count:
+                # We have an alternate centroid with a higher peak and a
+                # less spatially sparse clustering. We will use it.
+                logger.info(
+                    f"Overriding the cluster selection with an alternate!!"
+                    f" original best {first_choice_centroid.description()};"
+                    f" new best is {alt_centroid.description()}."
+                )
+                first_choice_centroid.source = ", ".join([
+                    first_choice_centroid.source, "original best, overridden"
+                ])
+                first_choice_centroid.best_overall = False
+                alt_centroid.source = ", ".join([
+                    alt_centroid.source, "overrides first choice"
+                ])
+                alt_centroid.best_overall = True
+                return True
+            else:
+                logger.info(f"An alternate, {alt_centroid.description()}, "
+                            "was considered and dropped.")
+        else:
+            logger.info("No alternate centroids had higher peaks.")
+    else:
+        logger.info("No alternate centroids were considered.")
+
+    return False
 
 
 def find_peripheral_centroids(

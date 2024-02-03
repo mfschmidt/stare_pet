@@ -12,8 +12,10 @@ from .util import from_cache, to_cache
 from .centroid import Centroid
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
 from .plotting import plot_top_centroids_atlas
-from .centroid_heuristics import find_vascular_centroids
-from .centroid_heuristics import likely_irreversible_linear
+from .centroid_heuristics import (
+    find_vascular_centroids, likely_irreversible_linear,
+    consider_alternate_clusters
+)
 
 
 def make_atlas_and_mask(
@@ -186,7 +188,7 @@ def tabulate_centroids(centroids, added_columns=None):
 
 
 def load_or_calculate_clusters(
-        results, cluster_function, source_4d_image, ks, step
+        results, cluster_function, source_4d_image, ks, step, logger=None
 ):
     """ Treat data as either 4D Nifti1Image or 2D array """
 
@@ -210,6 +212,15 @@ def load_or_calculate_clusters(
             verbose=results.args.verbose,
             logger=results.logger,
         )
+        # Spatial analyses require the shape of the cluster's source image
+        for centroid in centroids:
+            centroid.original_shape = source_4d_image.shape
+        if not results.args.no_cluster_override:
+            consider_alternate_clusters(
+                centroids, model_fits, source_4d_image,
+                verbose=results.args.verbose, logger=logger
+            )
+
         # Save the results, so we can just load them if there's a next time.
         to_cache(
             (data, centroids, model_fits),
