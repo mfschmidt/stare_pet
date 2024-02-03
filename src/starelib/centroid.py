@@ -58,7 +58,7 @@ class Centroid(TimeActivityCurve):
     def to_3d(self):
         if any([self.labels is None, self.original_shape is None, ]):
             return None
-        return reshape_labels_to_3d(self.labels, self.original_shape)
+        return reshape_labels_to_3d(self.labels, self.original_shape[:3])
 
     def update_spatial_clusters(
             self, labels=None, force_update=False, verbose=0, logger=None
@@ -68,7 +68,7 @@ class Centroid(TimeActivityCurve):
         message_list = []
         if self.blob_count == 0 or force_update:
             blob_df, blob_ids, voxel_counts = get_cluster_blobs(
-                reshape_labels_to_3d(labels, self.original_shape),
+                reshape_labels_to_3d(labels, self.original_shape[:3]),
                 label=self.label, verbose=verbose, messages=message_list,
             )
             self.blob_count = len(blob_ids)
