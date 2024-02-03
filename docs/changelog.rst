@@ -4,6 +4,11 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.8.2, 2023-02-01
+
+- Handles alternate cluster selection, using spatial analyses
+- Allows for resampling an image for k-means clustering
+
 Version 0.7.4, 2023-12-14
 
 - Fixed plotting to handle more or fewer than six regions
