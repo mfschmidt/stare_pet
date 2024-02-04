@@ -90,8 +90,8 @@ class Centroid(TimeActivityCurve):
         if self.blob_count == 0:
             blob_str = "no sparsity data"
         else:
-            blob_str = "{:d} blobs w/~{} voxels each".format(
-                int(self.blob_count), int(self.voxels_per_blob)
+            blob_str = "{:d} blobs w/~{:0.1f} voxels each".format(
+                int(self.blob_count), float(self.voxels_per_blob)
             )
 
         # Return description of centroid
