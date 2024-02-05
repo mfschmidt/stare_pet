@@ -82,7 +82,17 @@ def get_argument_parser():
     )
     parser.add_argument(
         "--save-all-cluster-masks", action="store_true",
-        help="Turn on to save nifti masks of all clusters, not just best"
+        help="Turn on to save nifti masks of all clusters, not just best. "
+             "These masks will be saved in the 'debug/' directory."
+    )
+    parser.add_argument(
+        "--save-all-failures", action="store_true",
+        help="This feature is not yet available. In a future version, "
+             "Turn on to save parameters of failed curve fits. "
+             "This can be useful for debugging or investigating the range of "
+             "parameters useful for fitting curves, but can consume tens of "
+             "gigabytes of memory for hard-to-fit TACs. These failures will "
+             "be written to a csv file in the 'debug/' directory."
     )
     parser.add_argument(
         "--no-cluster-override", action="store_true",
