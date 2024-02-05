@@ -8,6 +8,9 @@ class StareResults(Results):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # Use print rather than logger to output regardless of verbosity.
+        print(f"Begin {self._name} at {self.start_time_str}.")
+
         # This object will need member variables to store things that don't
         # yet exist. Make room here.
 
@@ -82,3 +85,11 @@ class StareResults(Results):
             if centroid.best_overall:
                 return centroid
         return None
+
+    def end(self):
+        super(StareResults, self).end()
+        if self.args.verbose == 0:
+            # The end time will not be written by Results, so print it.
+            print(f"End {self._name} at {self.end_time_str}. "
+                  f"{str(self.elapsed())} elapsed.")
+        # else Results would have already printed it via logger.info()

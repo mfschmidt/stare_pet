@@ -11,7 +11,7 @@ class Results:
     """ A base class for storing results throughout a pipeline run.
     """
 
-    def __init__(self, name, title, parsed_args, dt_format="%Y-%m-%d_%I-%M"):
+    def __init__(self, name, title, parsed_args, dt_format="%Y-%m-%d_%H-%M"):
         self._dt_format = dt_format
         self._name = name
         self._title = title
