@@ -4,7 +4,12 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
-Version 0.8.2, 2023-02-01
+Version 0.8.3, 2024-02-04
+
+- Only saves every failed bootstrap curve if --save-failures is on
+- Saves failures in FailureCollection for efficiency
+
+Version 0.8.2, 2024-02-01
 
 - Handles alternate cluster selection, using spatial analyses
 - Allows for resampling an image for k-means clustering

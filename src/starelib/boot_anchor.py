@@ -5,11 +5,11 @@ from scipy.optimize import least_squares
 from scipy.stats import gaussian_kde
 from datetime import datetime
 
-from .util import get_kde_fwhm_points
-from .util import from_cache, to_cache
+from .util import get_kde_fwhm_points, from_cache, to_cache
 from .fitting_models import decay_model, find_curve_fits, func2tc_model
 from .plotting import plot_regional_densities, plot_bootstrap_curves
 from .mp_queues import run_in_mp_queue
+from .error import failure_codes, Failure, FailureCollection
 
 
 class CurveGenerator:
@@ -62,12 +62,7 @@ def fit_curve_to_exponential(bootstrap_curve, vascular_tac, uniform_tac):
             post_peak_boot_curve_fit_uniform
         ])
         if np.any(full_boot_curve_fit_uniform < 0.0):
-            failures.append({
-                "code": 1,
-                "fit": "exp",
-                "desc": "good fit, but had negatives",
-                "p0": fit['p0'],
-            })
+            failures.append(Failure(failure_codes.TAC_HAS_NEGATIVES, fit['p0']))
             return None, failures
         else:
             fit['curve'] = full_boot_curve_fit_uniform
@@ -117,13 +112,45 @@ def fit_curves_mp(
     ) for i in range(num_curves)]
 
     curve_fit_results = run_in_mp_queue(
-        worker, list_of_args, results.args.num_cpus, results.logger
+        bootstrap_worker, list_of_args, results.args.num_cpus, results.logger
     )
 
     # Count up failures from fitting all the curves and report them.
-    num_failures = np.sum([len(r['errors']) for r in curve_fit_results])
-    results.logger.info(f"Fitting {len(curve_fit_results)} curves required "
-                        f"{num_failures} failures.")
+    num_tac_failures = sum([r['tac_failure_count'] for r in curve_fit_results])
+    num_exp_failures = sum([r['exp_failure_count'] for r in curve_fit_results])
+    results.logger.info(
+        f"Fitting {len(curve_fit_results):,} curves successfully required "
+        f"{num_tac_failures:,} tac-fit failures, "
+        f"after {num_exp_failures:,} triple-exponential-fit failures. "
+    )
+
+    all_tac_failures = FailureCollection()
+    all_exp_failures = FailureCollection()
+    for result in curve_fit_results:
+        # Now aggregate failures into one object that accumulates all counts
+        all_tac_failures.join(result['tac_failures'])
+        all_exp_failures.join(result['exp_failures'])
+        del result['exp_failures']
+        del result['tac_failures']
+
+    results.logger.info(
+        f"A grand total of {len(all_exp_failures):,} "
+        f"various failures were ignored during exponential-fitting."
+    )
+    for code, failures in all_exp_failures.items():
+        results.logger.info(
+            f" * {failures['count']:>10,} {failures['description']}"
+        )
+
+    results.logger.info(
+        f"A grand total of {len(all_tac_failures):,} "
+        f"various failures were ignored during tac-fitting."
+    )
+    for code, failures in all_tac_failures.items():
+        results.logger.info(
+            f" * {failures['count']:>10,} '{failures['description']}'"
+        )
+
     return curve_fit_results
 
 
@@ -152,7 +179,7 @@ def fit_curve_to_regional_tacs(
         x=vascular_tac.timepoints,
     )
 
-    fit_errors = []
+    fit_failures = FailureCollection()
     fit_successes = []
     for j, region in enumerate(regions):
         # Adjust regional TAC by bootstrapped vascular activity
@@ -198,20 +225,14 @@ def fit_curve_to_regional_tacs(
                     })
                 else:
                     # This can happen repeatedly, no harm in overwriting nans
-                    fit_errors.append({
-                        "code": 21,
-                        "fit": "tac",
-                        "desc": "least squares failure to fit",
-                        "p0": list(x0.ravel()),
-                    })
+                    fit_failures.append(
+                        Failure(failure_codes.TAC_GENERIC, x0.ravel())
+                    )
                     failures += 1
             except ValueError:
-                fit_errors.append({
-                    "code": 99,
-                    "fit": "tac",
-                    "desc": "ValueError in least_squares",
-                    "p0": list(x0.ravel()),
-                })
+                fit_failures.append(
+                    Failure(failure_codes.TAC_VALUE_ERROR, x0.ravel())
+                )
                 failures += 1
     # If any of the fits, for any of the regions is near 0 or 1,
     # invalidate the whole thing. 2TCM should not be 0 or 1
@@ -221,22 +242,16 @@ def fit_curve_to_regional_tacs(
         p0 = []
     if np.any(np.abs(rate_constants.ravel() < 0.0001)):
         rate_constants[:, :] = np.nan
-        fit_errors.append({
-            "code": 22,
-            "fit": "tac",
-            "desc": "least squares produced a zero rate constant",
-            "p0": p0,
-        })
+        fit_failures.append(
+            Failure(failure_codes.TAC_ZERO_PARAM, p0)
+        )
     elif np.any(np.abs(1.0 - rate_constants.ravel()) < 0.0001):
         rate_constants[:, :] = np.nan
-        fit_errors.append({
-            "code": 23,
-            "fit": "tac",
-            "desc": "least squares produced a one rate constant",
-            "p0": p0,
-        })
+        fit_failures.append(
+            Failure(failure_codes.TAC_ONE_PARAM, p0)
+        )
 
-    return rate_constants, fit_errors
+    return rate_constants, fit_failures
 
 
 def find_2tc_bounds(rate_constants):
@@ -290,7 +305,7 @@ def find_2tc_bounds(rate_constants):
     return lower_bounds, upper_bounds, peaks, fwhm
 
 
-def worker(arg_tuple):
+def bootstrap_worker(arg_tuple):
     """ Bootstrap a random starting point, fit to exponential, fit to data
 
         This worker can be launched in a separate process to do all three
@@ -313,8 +328,10 @@ def worker(arg_tuple):
     for handler in logger.handlers:
         handler.flush()
 
-    cumulative_errors = []
-    # failed_bootstrap_curves = []
+    # Maintain a count of all failures, and their types
+    cumulative_exp_failures = FailureCollection()
+    cumulative_tac_failures = FailureCollection()
+    exp_failure_count, tac_failure_count = 0, 0
     bootstrap_curve, rate_constants, exp_fit = None, None, None
     final_curve = None
     while final_curve is None:
@@ -323,26 +340,27 @@ def worker(arg_tuple):
         bootstrap_curve = curve_generator.new()
 
         # Second, fit this curve to three stacked exponentials.
-        exp_fit, fit_exp_errors = fit_curve_to_exponential(
+        exp_fit, fit_exp_failures = fit_curve_to_exponential(
             bootstrap_curve, vascular_tac, uniform_tac
         )
-        cumulative_errors = cumulative_errors + fit_exp_errors
+        cumulative_exp_failures.join(fit_exp_failures)
         if exp_fit is None:
+            exp_failure_count += 1
             # failed_bootstrap_curves.append(bootstrap_curve)
             continue
 
         # Third, fit the exponentials onto actual data.
-        rate_constants, fit_tac_errors = fit_curve_to_regional_tacs(
+        rate_constants, fit_tac_failures = fit_curve_to_regional_tacs(
             exp_fit['curve'], vascular_tac, uniform_tac,
             corrected_regional_tacs, num_2tc_params, vasc_corr_pct
         )
+        cumulative_tac_failures.join(fit_tac_failures)
         good_rate_constants = rate_constants[[
             ~np.any(np.isnan(rate_constants[_].ravel()))
             for _ in range(rate_constants.shape[0])
         ]]
-        cumulative_errors = cumulative_errors + fit_tac_errors
         if len(good_rate_constants) == 0:
-            # failed_bootstrap_curves.append(bootstrap_curve)
+            tac_failure_count += 1
             continue
         else:
             final_curve = good_rate_constants  # triggers break from while loop
@@ -360,7 +378,10 @@ def worker(arg_tuple):
         "bootstrap_curve": bootstrap_curve,
         "fit_exp": exp_fit,
         "rate_constants": rate_constants,
-        "errors": cumulative_errors,
+        "exp_failures": cumulative_exp_failures,
+        "exp_failure_count": exp_failure_count,
+        "tac_failures": cumulative_tac_failures,
+        "tac_failure_count": tac_failure_count,
         "elapsed_time": worker_end - worker_start,
     }
 
@@ -414,7 +435,10 @@ def boot_anchor(results):
     else:
         logger.info("  loaded cached step 4 curve fits to save time")
 
-    num_failures = np.sum([len(r['errors']) for r in good_curves_fits])
+    num_failures = np.sum([
+        r['exp_failure_count'] + r['tac_failure_count']
+        for r in good_curves_fits
+    ])
     num_total_bootstraps = len(good_curves_fits) + num_failures
 
     if len(good_curves_fits) == 0:

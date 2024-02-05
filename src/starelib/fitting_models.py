@@ -7,6 +7,8 @@ from scipy.interpolate import pchip_interpolate
 from scipy.signal import lfilter
 from scipy.optimize import OptimizeWarning
 
+from .error import failure_codes, Failure, FailureCollection
+
 
 def root_mean_square(actual, predicted):
     """ Return the RMS error between actual and predicted values.
@@ -173,7 +175,7 @@ def find_curve_fits(
 
     # Fit repeatedly until we have ten successes or complete failure.
     successes = []
-    failures = []
+    failures = FailureCollection()
     while len(successes) < success_limit and len(failures) < failure_limit:
         np.random.seed = 42 + (len(failures) * 7)
         p0 = randomize_stacked_exponential_parameters(6)
@@ -202,33 +204,17 @@ def find_curve_fits(
             # than zero, and less than 1. Anything over 10 is truly missing
             # the curve and can be dismissed as failure.
             if np.isnan(retval[0]).any() or np.isnan(retval[1]).any():
-                failures.append({
-                    "code": 2,
-                    "fit": "exp",
-                    "desc": "fit converged, but converged to NaN",
-                    "p0": p0,
-                })
+                failures.append(Failure(failure_codes.CONVERGED_TO_NAN, p0))
                 logger.debug("a curve fit converged, but converged to NaN, "
                              f"failure {len(failures)} for this model, "
                              f"{len(successes)} successes.")
             elif np.isinf(retval[0]).any() or np.isinf(retval[1]).any():
-                failures.append({
-                    "code": 3,
-                    "fit": "exp",
-                    "desc": "fit converged, but converged to Infinity",
-                    "p0": p0,
-                })
+                failures.append(Failure(failure_codes.CONVERGED_TO_INF, p0))
                 logger.debug("a curve fit converged, but converged to infinity,"
                              f" failure {len(failures)} for this model, "
                              f"{len(successes)} successes.")
             elif weighted_error > 10.0:
-                failures.append({
-                    "code": 4,
-                    "fit": "exp",
-                    "desc": "fit converged, but weighted error of "
-                            f"{weighted_error:0.2f} (rms {rms:0.2f}) is high.",
-                    "p0": p0,
-                })
+                failures.append(Failure(failure_codes.ERROR_TOO_HIGH, p0))
                 logger.debug("a curve fit converged, but weighted error of "
                              f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
                              f"failure {len(failures)} for this model, "
@@ -244,28 +230,21 @@ def find_curve_fits(
                     "p0": p0,
                 })
         except RuntimeError as e:
-            failures.append({
-                "code": 11, "fit": "exp", "desc": e.args[0], "p0": p0,
-            })
-            logger.debug("a curve fit failed to converge, "
+            failures.append(Failure(failure_codes.RUNTIME_ERROR, p0))
+            logger.debug(f"a curve fit raised RuntimeError '{e}', "
                          f"failure {len(failures)} for this model, "
                          f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except OptimizeWarning as e:
-            failures.append({
-                "code": 12, "fit": "exp", "desc": e.args[0], "p0": p0,
-            })
-            logger.debug("a curve fit raised an optimize warning, "
+            failures.append(Failure(failure_codes.OPTIMIZE_WARNING, p0))
+            logger.debug(f"a curve fit raised an optimize warning '{e}', "
                          f"failure {len(failures)} for this model, "
                          f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except RuntimeWarning:
-            failures.append({
-                "code": 13, "fit": "exp",
-                "desc": "overflow encountered, probably", "p0": p0,
-            })
+            failures.append(Failure(failure_codes.RUNTIME_WARNING, p0))
             logger.debug("a curve fit raised a runtime warning, "
                          f"failure {len(failures)} for this model, "
                          f"{len(successes)} successes.")
@@ -277,8 +256,10 @@ def find_curve_fits(
                 f"and tolerating {failure_limit} failures before quitting: "
                 f"{len(successes)} converged and {len(failures)} failed to.")
 
-    # In the case of success, this is a list of dicts.
+    # In the case of success, 'successes' is a list of dicts.
     # In the case of failure, it is an empty list.
+    # 'failures' is an object that intentionally failed to save the parameters,
+    # and only tracks the counts for each error type.
     return successes, failures
 
 
