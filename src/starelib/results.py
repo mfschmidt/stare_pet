@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime
+import time
 import pickle
 
 from .report import Report
@@ -85,8 +86,10 @@ class Results:
         # This handler adapts to the verbosity in the command line.
         terminal_handler = logging.StreamHandler(sys.stdout)
         terminal_handler.setFormatter(logging.Formatter(
-            fmt="%(asctime)s : %(message)s", datefmt="%I:%M:%S",
+            fmt="%(asctime)s : %(message)s",
+            datefmt="%H:%M:%S %Z",
         ))
+        terminal_handler.converter = time.localtime
         if self._args.verbose > 1:
             terminal_handler.setLevel(logging.DEBUG)
         elif self._args.verbose > 0:
@@ -106,6 +109,7 @@ class Results:
             fmt="%(asctime)s : %(levelname)s : %(message)s",
             datefmt=self._dt_format,
         ))
+        file_handler.converter = time.localtime
         file_handler.setLevel(logging.INFO)
         if (self._args.verbose > 1) or self._args.debug:
             file_handler.setLevel(logging.DEBUG)
