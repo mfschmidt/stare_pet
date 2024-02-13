@@ -55,10 +55,18 @@ class Centroid(TimeActivityCurve):
         d["source"] = self.source
         return d
 
-    def to_3d(self):
+    def labels_in_3d(self):
         if any([self.labels is None, self.original_shape is None, ]):
             return None
         return reshape_labels_to_3d(self.labels, self.original_shape[:3])
+
+    def mask_in_3d(self):
+        if any([self.labels is None, self.original_shape is None, ]):
+            return None
+        return reshape_labels_to_3d(
+            np.array(self.labels == self.label).astype(np.uint8),
+            self.original_shape[:3]
+        )
 
     def update_spatial_clusters(
             self, labels=None, force_update=False, verbose=0, logger=None
