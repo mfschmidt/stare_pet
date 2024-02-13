@@ -90,7 +90,7 @@ def k_means_worker(arg_tuple):
     # Workers get a single argument, so the caller must pack arguments
     # into a tuple and the worker (this function) must unpack them.
     # This order must match exactly the order where they're packed.
-    (k, data, verbose) = arg_tuple
+    (k, data, random_seed, verbose) = arg_tuple
 
     worker_start = datetime.now()
     print(f"    Starting k-means worker for k={k} "
@@ -102,7 +102,7 @@ def k_means_worker(arg_tuple):
         n_clusters=k,
         n_init=3,
         max_iter=1024 ** 2,
-        random_state=42,
+        random_state=random_seed,
         verbose=verbose,
     )
     k_means.fit(data)
@@ -132,6 +132,7 @@ def find_centroids(
         mid_times=None,
         num_cpus=1,
         verbose=0,
+        random_seed=42,
         logger=None,
 ):
     """Step 1. From all PET data, find a vascular cluster.
@@ -146,6 +147,7 @@ def find_centroids(
     :param iterable mid_times: will be stored alongside activity in TACs
     :param num_cpus: How many CPUs to deploy on multiprocessing
     :param int verbose: Set non-zero to increase logging, higher is more
+    :param int random_seed: Allow setting the random seed, if desired
     :param logging.logger logger: output comments here if available
 
     :returns tuple: The best TAC, and all the TACs
@@ -159,7 +161,7 @@ def find_centroids(
     pre_k_timestamp = datetime.now()
     list_of_args = []
     for k in ks:
-        list_of_args.append((k, data, verbose))
+        list_of_args.append((k, data, random_seed, verbose))
     # Run each tuple of arguments in a separate process to save time.
 
     k_means_results = run_in_mp_queue(
@@ -227,6 +229,54 @@ def find_centroids(
     return all_centroids, k_means_fits
 
 
+def label_best_centroid(centroids, best_label):
+    """ From a list of centroids, go through and label the best. """
+
+    if best_label == 'best_in_k':
+        # Select the 'best' from among all vascular centroids.
+        # Do this two ways, find the earliest peak and the highest peak,
+        # then sort the earliest by height and the highest by onset.
+        peak_idxs = np.array([c.peak_index for c in centroids])
+        peak_vals = np.array([c.peak_value for c in centroids])
+        earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
+        highest_peak_idxs = np.where(peak_vals == np.max(peak_vals))[0]
+        # Of the vascular centroids peaking at the same earliest time,
+        # which is highest?
+        highest_early_peak_idx = earliest_peak_idxs[np.argmax([
+            centroids[i].peak_value for i in earliest_peak_idxs
+        ])]
+
+        best_centroid = centroids[highest_early_peak_idx]
+        best_centroid.best_in_k = True
+
+    elif best_label == 'best_overall':
+        top_indices, top_frequencies = np.unique(
+            [c.peak_index for c in centroids], return_counts=True
+        )
+
+        # This is the most likely time point to have the best vascular peak,
+        # but it is only about 90% accurate in our tests. So we'll also consider
+        # the next time point, but only if it has both a higher peak than our
+        # current best centroid and a more spatially concise clustering.
+        if len(top_frequencies) == 0:
+            raise TypeError(f"None of the {len(centroids)} clusters appear "
+                            "vascular. There's nothing more to be done.")
+        best_centroid_idx = top_indices[np.argmax(top_frequencies)]
+
+        # Make a list of best-in-k centroids that peak at the same,
+        # most common, time point
+        centroids_with_best_idx = [
+            c for c in centroids if (c.peak_index == best_centroid_idx)
+        ]
+        # Of those centroids peaking together, which one peaks highest?
+        best_centroid = centroids_with_best_idx[
+            np.argmax([c.peak_value for c in centroids_with_best_idx])
+        ]
+        best_centroid.best_overall = True
+
+    return best_centroid
+
+
 def find_vascular_centroids(
         data,
         ks,
@@ -288,40 +338,10 @@ def find_vascular_centroids(
         # Higher initial values are more indicative of arterial signal,
         # which is preferable to venous or sinus
         if len(vascular_centroids) > 0:
-            # Select the 'best' from among all vascular centroids.
-            # Do this two ways, find the earliest peak and the highest peak,
-            # then sort the earliest by height and the highest by onset.
-            peak_idxs = np.array([c.peak_index for c in vascular_centroids])
-            peak_vals = np.array([c.peak_value for c in vascular_centroids])
-            earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
-            highest_peak_idxs = np.where(peak_vals == np.max(peak_vals))[0]
-            # Of the vascular centroids peaking at the same earliest time,
-            # which is highest?
-            highest_early_peak_idx = earliest_peak_idxs[np.argmax([
-                vascular_centroids[i].peak_value for i in earliest_peak_idxs
-            ])]
-            # Of the vascular centroids with the highest peaks,
-            # which is earliest?
-            earliest_high_peak_idx = highest_peak_idxs[np.argmax([
-                vascular_centroids[i].peak_index for i in highest_peak_idxs
-            ])]
-            # Label this centroid as best, at least for this value of k
-            vascular_centroids[highest_early_peak_idx].best_in_k = True
-            # vascular_centroids[earliest_high_peak_idx].best_in_k = True
+            top_c = label_best_centroid(vascular_centroids, 'best_in_k')
             logger.debug(
                 "  Early centroid [{}/{}] has peak of {:0.3f} at t {}".format(
-                    vascular_centroids[highest_early_peak_idx].label,
-                    vascular_centroids[highest_early_peak_idx].k,
-                    vascular_centroids[highest_early_peak_idx].peak_value,
-                    vascular_centroids[highest_early_peak_idx].peak_index,
-                )
-            )
-            logger.debug(
-                "  High centroid [{}/{}] has peak of {:0.3f} at t {}".format(
-                    vascular_centroids[earliest_high_peak_idx].label,
-                    vascular_centroids[earliest_high_peak_idx].k,
-                    vascular_centroids[earliest_high_peak_idx].peak_value,
-                    vascular_centroids[earliest_high_peak_idx].peak_index,
+                    top_c.label, top_c.k, top_c.peak_value, top_c.peak_index,
                 )
             )
 
@@ -335,57 +355,9 @@ def find_vascular_centroids(
     # And where is that peak?
     # from Matlab vascClust.m:160:174
     best_in_k_centroids = [c for c in all_centroids if c.best_in_k]
-    top_indices, top_frequencies = np.unique(
-        [c.peak_index for c in best_in_k_centroids], return_counts=True
-    )
-    # Which time point is most likely to have the highest value?
-    """
-    # This is an alternative way to select the best centroid from among those
-    # NOT selected as the best in their individual k pool. When it was tested,
-    # it did not perform as well as the original, but it remains here in case
-    # someone else has the same idea and wants to test it.
-    vascular_peaks = [
-        (c.k, np.argmax(c.activity), np.max(c.activity))
-        for c in all_centroids
-        if c.features["likely_vascular"]
-    ]
-    values_per_peak = [
-        (idx, np.mean([vp[2] for vp in vascular_peaks if vp[1] == idx]))
-        for idx in np.unique([vp[1] for vp in vascular_peaks])
-    ]
-    best_centroid_idx = values_per_peak[
-        np.argmax([vp[1] for vp in values_per_peak])
-    ][0]
-    centroids_with_best_idx = [
-        c for c in all_centroids
-        if (c.peak_index == best_centroid_idx)
-    ]
-    """
-    # This is the most likely time point to have the best vascular peak,
-    # but it is only about 90% accurate in our tests. So we'll also consider
-    # the next time point, but only if it has both a higher peak than our
-    # current best centroid and a more spatially concise clustering.
-    if len(top_frequencies) == 0:
-        logger.error(f"None of the {len(all_centroids)} clusters appear "
-                     "vascular. There's nothing more to be done.")
-        raise TypeError("No vascular clusters available.")
-    best_centroid_idx = top_indices[np.argmax(top_frequencies)]
-
-    # Make a list of best-in-k centroids that peak at the same,
-    # most common, time point
-    centroids_with_best_idx = [
-        c for c in best_in_k_centroids if (c.peak_index == best_centroid_idx)
-    ]
-    # Of those centroids peaking together, which one peaks highest?
-    first_choice_centroid = centroids_with_best_idx[
-        np.argmax([c.peak_value for c in centroids_with_best_idx])
-    ]
-    best_centroid = first_choice_centroid
-
-    # Label the centroid with the highest peak value
-    best_centroid.best_overall = True
-    logger.info(
-        f"The very best cluster is {best_centroid.description()}."
+    label_best_centroid(
+        [c for c in all_centroids if c.best_in_k],
+        'best_overall'
     )
 
     # Return a list of all centroids, with the best labelled as such.
