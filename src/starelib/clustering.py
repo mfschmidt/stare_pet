@@ -459,6 +459,54 @@ def two_step_cluster(results):
     # Overlaying HarvardOxford atlas regions in fsleyes lays them atop the
     # NEW Nifti1 space, not the original SpmAnalyze space.
 
+    if results.args.override_step_1_cluster is not None:
+        # Load alternate mask and use it for step 1 cluster results.
+        results.best_vascular_mask_path[1] = results.args.override_step_1_cluster
+        rpt_sect.add_line(f"Step 1 cluster was overridden by external mask.")
+        fake_step_one_3d_mask = nib.Nifti1Image.from_filename(
+            results.args.override_step_1_cluster
+        )
+        k_means_results[1]['best_mask'] = fake_step_one_3d_mask
+        fake_step_one_flat_mask = flatten_4d_to_2d(
+            np.expand_dims(fake_step_one_3d_mask.get_fdata(), 3)
+        ).astype(bool).ravel()
+        curr_2d_data = flatten_4d_to_2d(curr_4d_pet_img.get_fdata())
+        fake_2d_data = np.zeros(curr_2d_data.shape)
+        fake_2d_data[fake_step_one_flat_mask] = curr_2d_data[fake_step_one_flat_mask, :]
+        # Create a centroid based on the fake override mask.
+        real_best_centroid = k_means_results[1]['best_centroid']
+        fake_best_centroid = Centroid(
+            activity=np.mean(curr_2d_data[fake_step_one_flat_mask], axis=0),
+            timepoints=real_best_centroid.timepoints,
+            label=1,  # should be non-zero as zero indicates background
+            k=1,
+            name=f"centroid 1/1",
+            source="override",
+            labels=fake_step_one_flat_mask.astype(np.uint8),
+        )
+        # Prepare the actual data fed into step two.
+        k_means_results[1]['best_centroid'] = fake_best_centroid
+        k_means_results[1]['best_cluster_as_image'] = nib.nifti1.Nifti1Image(
+            unflatten_2d_to_4d(fake_2d_data, curr_4d_pet_img.shape),
+            affine=curr_4d_pet_img.affine,
+        )
+        k_means_results[1]['best_labels'] = fake_best_centroid.labels
+
+        # Delete the cache file for step two. We're overriding it.
+        cache_file = "sub-{}_step-1-2_centroids_and_fits.pkl".format(
+            results.args.subject,
+        )
+        (results.args.cache_path / cache_file).unlink(missing_ok=True)
+
+        # Save data for debugging and reporting
+        pickle.dump(
+            {
+                'orig_best_centroid_1': real_best_centroid,
+                'fake_best_centroid_1': fake_best_centroid,
+            },
+            open(results.args.debug_path / "step_one_override.pkl", "wb"),
+        )
+
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
     k_means_results[2] = load_or_calculate_clusters(
