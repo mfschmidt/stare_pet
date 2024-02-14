@@ -4,6 +4,15 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.8.6, 2024-02-13
+
+- Zero-pad PVC TACs, and corresponding regional TACs and mid-times
+  if TAC peaks at t=0.
+
+Version 0.8.5, 2024-02-13
+
+- Only include input volumes if they have a number, avoid 'mean' volumes.
+
 Version 0.8.3, 2024-02-04
 
 - Only saves every failed bootstrap curve if --save-failures is on
