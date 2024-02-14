@@ -100,7 +100,7 @@ def correct_partial_volumes(results):
 
     masked_data = reshaped_pvc_data[reshaped_vascular_mask_data.ravel() == 1]
 
-    results.pvc_mean_vascular_tac = TimeActivityCurve(
+    pvc_tac = TimeActivityCurve(
         activity=np.mean(masked_data, axis=0),
         timepoints=np.array(results.mid_times),
         missing_timepoints=results.ignored_mid_times,
@@ -108,6 +108,26 @@ def correct_partial_volumes(results):
         source="pvc",
         name="pvc",
     )
+    # In the case (CerePET scans, in particular) that the TAC starts at its
+    # peak and drops from there, fake it so that it seems to have risen from
+    # 0.0 to its peak, so it behaves like a real TAC.
+    if np.argmax(pvc_tac.activity) == 0:
+        # We need to pad our TAC with a zero time point.
+        pvc_tac.activity = np.insert(pvc_tac.activity, 0, 0.0)
+        pvc_tac.timepoints = np.insert(pvc_tac.timepoints, 0, 0.0)
+        pvc_tac.peak_index = np.argmax(pvc_tac.activity)
+        pvc_tac.sd = np.insert(pvc_tac.sd, 0, 0.0)
+
+        # And we need to pad our regional TACs to match
+        results.tacs.loc[-1] = np.zeros((len(results.tacs.columns),))
+        results.tacs.index = results.tacs.index + 1
+        results.tacs = results.tacs.sort_index()
+
+        # And we need to pad our mid-times to match, too
+        results.mid_times = np.insert(results.mid_times, 0, 0.0)
+
+    results.pvc_mean_vascular_tac = pvc_tac
+
     if results.args.debug:
         with open(
             results.args.debug_path /
