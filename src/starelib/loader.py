@@ -245,9 +245,13 @@ def get_individual_volumes(
     orig_dir.mkdir(parents=True, exist_ok=True)
     for pattern in ["{subject}.*.hdr", "*.nii", "*.nii.gz", ]:
         actual_pattern = pattern.format(subject=subject_id)
-        for i, img_file in enumerate(sorted(image_dir.glob(actual_pattern))):
+        i = 0
+        for img_file in sorted(image_dir.glob(actual_pattern)):
             # Check for named frame numbers, just to warn about misunderstanding
             match = re.search(r"[._-](\d+)[._-]", img_file.name)
+            if not match:
+                logger.warning(f"Skipping unnumbered file '{img_file.name}'")
+                continue
             if match and int(match.group(1)) != i + 1:
                 logger.warning("Image numbering does not match sort order.")
                 logger.warning(f"  '{img_file.name}' "
@@ -285,6 +289,7 @@ def get_individual_volumes(
                 frame=i + 1,
                 usable=((i + 1) not in frames_to_ignore),
             ))
+            i += 1
 
     # Return all the volumes, including any skipped one(s)
     return volumes
@@ -525,7 +530,11 @@ def gather_data(results):
             begin = skipped
         chunks.append(combined_image.slicer[:, :, :, begin:])
         cropped_image = nib.concat_images(chunks, axis=3)
-        logger.debug(f"  image now contains {cropped_image.shape[3]} volumes.")
+        logger.info(
+            f"Volumes [{', '.join([str(f) for f in args.ignore_frames])}] "
+            f"were ignored, so 4D image now contains {cropped_image.shape[3]} "
+            f"volumes."
+        )
     else:
         cropped_image = combined_image
 
@@ -537,7 +546,7 @@ def gather_data(results):
              args.output_path / f"sub-{args.subject}_cropped_4d.nii.gz")
     logger.debug(f"WROTE sub-{args.subject}_cropped_4d.nii.gz "
                  f"({cropped_image.shape}) to {str(args.output_path)}")
-    rpt_sect.add_line(f"Cropped {args.axial_slices_to_clip} slices from "
+    rpt_sect.add_line(f"Clipped {args.axial_slices_to_clip} slices from "
                       "the inferior of each PET volume taking them to "
                       f"{cropped_image.shape}.")
     # cropped_volumes = [cropped_image.slicer[:, :, :, i]
