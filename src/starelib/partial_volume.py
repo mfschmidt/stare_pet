@@ -126,6 +126,15 @@ def correct_partial_volumes(results):
         # And we need to pad our mid-times to match, too
         results.mid_times = np.insert(results.mid_times, 0, 0.0)
 
+        # And notify the user of our decision.
+        logger.warning(f"The vascular peak appears to be at the first time "
+                       f"point. So a zero time, zero activity point was "
+                       f"inserted before the first time point in the PVC "
+                       f"TAC, in the table of regional TACs, and in the "
+                       f"list of mid-times. The number of time points was "
+                       f"initially {len(results.tacs) - 1}, "
+                       f"and is now {len(results.tacs)}.")
+
     results.pvc_mean_vascular_tac = pvc_tac
 
     if results.args.debug:
