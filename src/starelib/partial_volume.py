@@ -29,7 +29,7 @@ def correct_partial_volumes(results):
     # Perform PVC on each of the original volumes provided
     pvc_volumes = []
     pvc_exe = "/usr/local/bin/petpvc"
-    for img in results.volume_images:
+    for img in [v for v in results.volume_images if v.usable]:
         pvc_filename = f"{results.args.subject}_pvc_{img.frame:02d}.nii.gz"
         pvc_path = results.args.output_path / "pvc" / pvc_filename
         full_command = [
