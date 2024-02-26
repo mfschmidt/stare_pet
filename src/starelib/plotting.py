@@ -229,6 +229,7 @@ def plot_top_centroids_atlas(
     """
 
     mean_pet_img = image.mean_img(pet4d_img)
+
     # Step 2 is necessarily a subset of step 1, so we can just add the ones.
     if step_2_mask_img is None:
         atlas_combo_img = nib.Nifti1Image(
@@ -237,8 +238,16 @@ def plot_top_centroids_atlas(
             dtype=np.uint8,
         )
     else:
+        if len(step_1_mask_img.shape) > 3:
+            step_1_data = image.mean_img(step_1_mask_img).get_fdata()
+        else:
+            step_1_data = step_1_mask_img.get_fdata()
+        if len(step_2_mask_img.shape) > 3:
+            step_2_data = image.mean_img(step_2_mask_img).get_fdata()
+        else:
+            step_2_data = step_2_mask_img.get_fdata()
         atlas_combo_img = nib.Nifti1Image(
-            step_1_mask_img.get_fdata() + step_2_mask_img.get_fdata(),
+            step_1_data + step_2_data,
             affine=mean_pet_img.affine, dtype=np.uint8,
         )
     two_grade_cmap = ListedColormap(['orange', 'red', ])
