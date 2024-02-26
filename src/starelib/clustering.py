@@ -184,7 +184,7 @@ def tabulate_centroids(centroids, added_columns=None):
     if added_columns is not None:
         for k, v in added_columns.items():
             df[k] = v
-    return df
+    return df.sort_values(by=['k', 'label', ])
 
 
 def load_or_calculate_clusters(
@@ -284,7 +284,15 @@ def save_table_of_centroid_stats(results, step):
             c, return_features=True, skip_t0=True
         )
         c.features["line_wo_first"] = {"slope": m2, "intercept": b2}
-
+        if results.args.debug:
+            results.logger.debug(
+                f"Analyzing spatial clusters for step {step}, k {c.label}/{c.k}"
+            )
+            c.update_spatial_clusters(
+                results.cluster_model_fits[step][c.k].labels_ + 1,
+                verbose=results.args.verbose,
+                logger=results.logger
+            )
     # And now, build the table and write it with other results.
     centroid_table = pd.concat([
         tabulate_centroids(
@@ -480,8 +488,8 @@ def two_step_cluster(results):
             timepoints=real_best_centroid.timepoints,
             label=1,  # should be non-zero as zero indicates background
             k=1,
-            name=f"centroid 1/1",
-            source="override",
+            name=f"Forced best step 1. centroid 1/1",
+            source="manual override",
             labels=fake_step_one_flat_mask.astype(np.uint8),
         )
         # Prepare the actual data fed into step two.
@@ -539,8 +547,8 @@ def two_step_cluster(results):
     best_centroid_1 = k_means_results[1]['best_centroid']
     best_centroid_2 = k_means_results[2]['best_centroid']
     top_centroid_fig = plot_top_centroids_atlas(
-        k_means_results[1]['best_mask'],
-        k_means_results[2]['best_mask'],
+        k_means_results[1]['best_cluster_as_image'],
+        k_means_results[2]['best_cluster_as_image'],
         curr_3d_pet_img,
         title="\n".join([
             f"{results.args.subject}:",
@@ -587,7 +595,6 @@ def two_step_cluster(results):
         # Save out nifti masks (which ones conditional on verbosity)
         resample_template = crop_3d_pet_img if data_are_resampled else None
         if results.args.save_all_cluster_masks or results.args.verbose > 2:
-            """
             save_centroid_masks(
                 results.cluster_centroids[step],
                 results.cluster_model_fits[step],
@@ -596,7 +603,6 @@ def two_step_cluster(results):
                 resample_to_template=resample_template,
                 logger=logger,
             )
-            """
             filename = f"sub-{results.args.subject}_step-{step}_vasc_tacs.png"
             unique_ks = sorted(np.unique([
                 c.k for c in results.cluster_centroids[step]

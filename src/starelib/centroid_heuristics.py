@@ -431,12 +431,12 @@ def consider_alternate_clusters(
                     f" original best {first_choice_centroid.description()};"
                     f" new best is {alt_centroid.description()}."
                 )
-                first_choice_centroid.source = ", ".join([
-                    first_choice_centroid.source, "original best, overridden"
+                first_choice_centroid.name = " ".join([
+                    "Original", first_choice_centroid.name,
                 ])
                 first_choice_centroid.best_overall = False
-                alt_centroid.source = ", ".join([
-                    alt_centroid.source, "overrides first choice"
+                alt_centroid.name = " ".join([
+                    "Best by override.", alt_centroid.name,
                 ])
                 alt_centroid.best_overall = True
                 return True
