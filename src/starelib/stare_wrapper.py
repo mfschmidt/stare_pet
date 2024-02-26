@@ -103,6 +103,10 @@ def get_argument_parser():
         help="Turn on to ensure the first cluster selected is used"
     )
     parser.add_argument(
+        "--stop-after-clustering", action="store_true",
+        help="Exit after clustering is complete"
+    )
+    parser.add_argument(
         "--output-all-fit-failures", action="store_true",
         help="Turn on to emit a note on each curve fit failure to the log"
     )

@@ -43,6 +43,8 @@ def main(parsed_args):
         )
         results = gather_data(results)
         results = two_step_cluster(results)
+        if results.args.stop_after_clustering:
+            return 0
         results = correct_partial_volumes(results)
         results = fit_vascular_mean_tac(results)
         results = tac_vascular_correction(results)
