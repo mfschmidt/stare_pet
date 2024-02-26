@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import pickle
 from scipy.interpolate import interp1d, PchipInterpolator
@@ -125,10 +126,10 @@ def fit_vascular_mean_tac(results):
     # Needs to know about ignored mid-times to weight durations appropriately
 
     cache_file = f"sub-{results.args.subject}_step-3_decay_model_fits.pkl"
-    successes_and_failures = from_cache(
+    successes, failures = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if successes_and_failures is None:
+    if successes is None:
         # Fit repeatedly until we have ten successes or complete failure.
         # Only fitting decay of activity past the peak - not pre-peak rise
         successes, failures = find_curve_fits(
@@ -138,12 +139,10 @@ def fit_vascular_mean_tac(results):
             sigmas=results.pvc_mean_vascular_tac.post_peak_sigmas(
                 method='sqrt'
             ),
-            success_limit=10, failure_limit=8192
+            success_limit=10, failure_limit=16384
         )
         to_cache((successes, failures), results.args.cache_path, cache_file)
     else:
-        successes = successes_and_failures[0]
-        failures = successes_and_failures[1]
         logger.info("  loaded cached step 3 decay model fits to save time")
 
     if results.args.debug and results.args.debug_path.exists():
@@ -153,6 +152,13 @@ def fit_vascular_mean_tac(results):
                 "wb"
         ) as f:
             pickle.dump(successes, f)
+
+    if successes is None:
+        logger.error("No fits were found for PVC data. "
+                     "STARE cannot continue. "
+                     "The mostly likely problem is a bad cluster selection?")
+        sys.exit(1)
+
     best_fit = select_best_fit(successes)
     lores_tac, hires_tac = interpolate_full_tac(
         results.pvc_mean_vascular_tac, best_fit, decay_model
