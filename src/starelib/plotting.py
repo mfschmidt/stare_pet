@@ -1095,3 +1095,44 @@ def plot_ks(py_data, ml_data, title="Parameter distributions", figsize=(16, 8)):
     )
 
     return fig
+
+
+def plot_cluster_comparisons(
+        probability_mask, agreement_data, ax_hist, ax_strip
+):
+    """ Plot a voxel-wise histogram and a cluster-wise strip plot. """
+
+    vals, cnts = np.unique(probability_mask, return_counts=True)
+    num_selected_voxels = np.sum(cnts[1:])
+    annot_text = ""
+    for i in range(1, len(vals)):
+        new_line = "{:,} voxels ({:0.0%}) with {:0.0%} agreement\n".format(
+            cnts[i], cnts[i] / num_selected_voxels, vals[i]
+        )
+        annot_text = new_line + annot_text
+    annot_text = (f"{num_selected_voxels:,} voxels selected by any iteration"
+                  "\n----\n" + annot_text)
+
+    sns.histplot(
+        probability_mask.ravel()[np.nonzero(probability_mask.ravel())],
+        ax=ax_hist
+    )
+    ax_hist.annotate(annot_text, (0.5, np.max(cnts[1:])), ha='center', va='top')
+    ax_hist.set_title(f"Overlapping Voxels across runs")
+    ax_hist.set_xlim(-0.05, 1.05)
+    ax_hist.set_xticks([0.0, 0.5, 1.0, ])
+    ax_hist.set_xticklabels(['0', '0.5', '1', ])
+    ax_hist.set_ylabel("How many voxels in pct agreement bin")
+
+    # Plot the strip plot, taking the bottom 20%
+    sns.stripplot(
+        data=agreement_data, x='dice', y='subject',
+        jitter=True, ax=ax_strip
+    )
+    ax_strip.set_title(f"Overlap between whole masks")
+    ax_strip.set_xlim(-0.05, 1.05)
+    ax_strip.set_xticks([0.0, 0.5, 1.0, ])
+    ax_strip.set_xticklabels(['0', '0.5', '1', ])
+    ax_strip.set_yticks([])
+    ax_strip.set_yticklabels([])
+    ax_strip.set_ylabel("")
