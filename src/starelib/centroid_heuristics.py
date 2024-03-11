@@ -280,7 +280,6 @@ def label_best_centroid(centroids, best_label):
 def find_vascular_centroids(
         data,
         ks,
-        allow_override=True,
         mid_times=None,
         num_cpus=1,
         verbose=0,
@@ -294,7 +293,6 @@ def find_vascular_centroids(
 
     :param ndarray data: Array of timeseries
     :param iterable ks: Iterable of integers, each used as a k in k-means
-    :param bool allow_override: Check for a higher cluster one t later
     :param iterable mid_times: will be stored alongside activity in TACs
     :param int num_cpus: how many processes to use on finding centroids
     :param int verbose: Set non-zero to increase logging, higher is more
