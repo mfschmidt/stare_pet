@@ -206,7 +206,6 @@ def load_or_calculate_clusters(
         # Calculate the clusters via k-means with multiprocessing
         centroids, model_fits = cluster_function(
             data, ks,
-            allow_override=(not results.args.no_cluster_override),
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             verbose=results.args.verbose,
@@ -215,7 +214,10 @@ def load_or_calculate_clusters(
         # Spatial analyses require the shape of the cluster's source image
         for centroid in centroids:
             centroid.original_shape = source_4d_image.shape
-        if not results.args.no_cluster_override:
+        if (
+                (not results.args.no_cluster_override) and
+                (not results.args.override_step_1_cluster)
+        ):
             consider_alternate_clusters(
                 centroids, model_fits, source_4d_image,
                 verbose=results.args.verbose, logger=logger
@@ -471,26 +473,33 @@ def two_step_cluster(results):
         # Load alternate mask and use it for step 1 cluster results.
         results.best_vascular_mask_path[1] = results.args.override_step_1_cluster
         rpt_sect.add_line(f"Step 1 cluster was overridden by external mask.")
-        fake_step_one_3d_mask = nib.Nifti1Image.from_filename(
+        step_1_fake_3d_mask = nib.Nifti1Image.from_filename(
             results.args.override_step_1_cluster
         )
-        k_means_results[1]['best_mask'] = fake_step_one_3d_mask
-        fake_step_one_flat_mask = flatten_4d_to_2d(
-            np.expand_dims(fake_step_one_3d_mask.get_fdata(), 3)
+        if step_1_fake_3d_mask.shape != k_means_results[1]['best_mask']:
+            step_1_fake_3d_mask = image.resample_img(
+                step_1_fake_3d_mask,
+                target_affine=k_means_results[1]['best_mask'].affine,
+                interpolation='nearest',
+                target_shape=k_means_results[1]['best_mask'].shape,
+            )
+        k_means_results[1]['best_mask'] = step_1_fake_3d_mask
+        step_1_fake_flat_mask = flatten_4d_to_2d(
+            np.expand_dims(step_1_fake_3d_mask.get_fdata(), 3)
         ).astype(bool).ravel()
         curr_2d_data = flatten_4d_to_2d(curr_4d_pet_img.get_fdata())
         fake_2d_data = np.zeros(curr_2d_data.shape)
-        fake_2d_data[fake_step_one_flat_mask] = curr_2d_data[fake_step_one_flat_mask, :]
+        fake_2d_data[step_1_fake_flat_mask] = curr_2d_data[step_1_fake_flat_mask, :]
         # Create a centroid based on the fake override mask.
         real_best_centroid = k_means_results[1]['best_centroid']
         fake_best_centroid = Centroid(
-            activity=np.mean(curr_2d_data[fake_step_one_flat_mask], axis=0),
+            activity=np.mean(curr_2d_data[step_1_fake_flat_mask], axis=0),
             timepoints=real_best_centroid.timepoints,
             label=1,  # should be non-zero as zero indicates background
             k=1,
             name=f"Forced best step 1. centroid 1/1",
             source="manual override",
-            labels=fake_step_one_flat_mask.astype(np.uint8),
+            labels=step_1_fake_flat_mask.astype(np.uint8),
         )
         # Prepare the actual data fed into step two.
         k_means_results[1]['best_centroid'] = fake_best_centroid
