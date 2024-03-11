@@ -126,10 +126,10 @@ def fit_vascular_mean_tac(results):
     # Needs to know about ignored mid-times to weight durations appropriately
 
     cache_file = f"sub-{results.args.subject}_step-3_decay_model_fits.pkl"
-    successes, failures = from_cache(
+    cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if successes is None:
+    if cached_data is None:
         # Fit repeatedly until we have ten successes or complete failure.
         # Only fitting decay of activity past the peak - not pre-peak rise
         successes, failures = find_curve_fits(
@@ -143,6 +143,7 @@ def fit_vascular_mean_tac(results):
         )
         to_cache((successes, failures), results.args.cache_path, cache_file)
     else:
+        (success, failures) = cached_data
         logger.info("  loaded cached step 3 decay model fits to save time")
 
     if results.args.debug and results.args.debug_path.exists():
