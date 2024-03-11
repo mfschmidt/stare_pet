@@ -9,6 +9,7 @@ from scipy.stats import gaussian_kde
 import warnings
 import pickle
 from nibabel import Nifti1Image
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class StareVolume:
@@ -462,3 +463,85 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
         )
 
     return blob_data, blob_ids, voxel_counts
+
+
+def dice_coef(y_true, y_pred):
+    """ Calculate one scalar Dice's coefficient for two vectors. """
+    intersection = np.sum(y_true * y_pred)
+    denominator = np.sum(y_true) + np.sum(y_pred)
+    if denominator == 0.0:
+        # Comparing two all-zero vectors would be an odd choice, but handle it.
+        return 1.0
+    else:
+        return 2.0 * intersection / denominator
+
+
+def dice_similarity(mat_a, mat_b):
+    """ Calculate Dice's coefficients across each row of each matrix. """
+
+    dice_mat = np.zeros((mat_a.shape[0], mat_b.shape[0]))
+    for row_a in range(mat_a.shape[0]):
+        for row_b in range(mat_b.shape[0]):
+            dice_mat[row_a, row_b] = dice_coef(
+                mat_b[row_b, :], mat_a[row_a, :]
+            )
+            # dice_mat[row_b, row_a] = dice_mat[row_a, row_b]
+    return dice_mat
+
+
+def cos_sim_coef(y_true, y_pred):
+    return cosine_similarity(
+        y_true.reshape(1, -1), y_pred.reshape(1, -1)
+    )[0, -1]
+
+
+def mask_matrix(labels):
+    """ Build a binary vector mask for each label in labels,
+        then stack them into a matrix.
+    """
+    mask_vectors = list()
+    for label in sorted(np.unique(labels)):
+        mask_vectors.append(
+            np.array(labels == label).astype(int).reshape(1, -1)
+        )
+    return np.vstack(mask_vectors)
+
+
+def get_mask_file(result_path, step=2, platform="unknown", verbose=False):
+    """ From a STARE run path, find the best vascular cluster. """
+
+    candidates = []
+    print(f"  searching '{result_path}'...")
+    if platform.lower().startswith("matlab"):
+        candidates = [_p for _p in result_path.glob(
+            f"anchoring/figs-masks/Step{step}_*clusters_Vasc_only_mask-ind*.nii"
+        ) if "ORIGINAL" not in str(_p)]
+    elif platform.lower().startswith("python"):
+        candidates = list(result_path.glob(
+            f"masks/cluster_step-{step}_best_mask.nii.gz"
+        ))
+    else:
+        print(f"ERROR: directory neither matlab nor python.")
+    if len(candidates) == 1:
+        if verbose:
+            print(f"  found mask at '{candidates[0]}'")
+        return candidates[0]
+    elif len(candidates) > 1:
+        print(f"WARNING: Multiple masks available!")
+        for candidate in candidates:
+            print(f"  {str(candidate)}")
+        if verbose:
+            print(f"  found mask at '{candidates[0]}'")
+        return candidates[0]
+    else:
+        print(f"ERROR: No masks found in '{str(result_path)}'!")
+        return None
+
+
+def get_mask(mask_path, verbose=False):
+    """ Read the 'mask_path' file and return its contents """
+
+    img = nib.Nifti1Image.from_filename(mask_path)
+    if verbose:
+        print(f"  loaded {img.shape}-shaped array from '{mask_path.name}'.")
+    return img, np.asarray(img.get_fdata()).astype(bool)
