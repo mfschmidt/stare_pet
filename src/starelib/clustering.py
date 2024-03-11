@@ -153,7 +153,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template,
             c_fig = plot_top_centroids_atlas(
                 nib.load(mask_path),
                 None,
-                current_template,
+                resample_to_template,
                 title="\n".join([
                     f"{output_path.parent.name}:",
                     f"step 1. orange. {centroid.label} of {centroid.k}, "
