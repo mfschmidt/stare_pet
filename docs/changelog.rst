@@ -4,6 +4,10 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.9.1, 2024-06-05
+
+- Allow shortening timespan to facilitate time stability analyses.
+
 Version 0.8.6, 2024-02-13
 
 - Zero-pad PVC TACs, and corresponding regional TACs and mid-times
