@@ -727,26 +727,36 @@ def prep_curve_df(df, base_tac, src_abbr, src_name):
 
 
 def plot_tac_with_sd_lines(
-        tac, ax, color='black', sd_color='gray', label='tac'
+        tac, ax, color='black', sd_color='gray', label='tac',
+        points=None, linestyle='dashed', scatter=False,
 ):
     """ Plot one TAC, with its SD boundaries. """
 
+    _n = len(tac.timepoints)
+    if points is not None:
+        _n = np.min([len(tac.timepoints), int(points), ])
+
     if tac.sd is not None:
         sns.lineplot(
-            x=tac.timepoints, y=tac.activity - tac.sd,
+            x=tac.timepoints[:_n], y=(tac.activity - tac.sd)[:_n],
             color=sd_color, linewidth="3", linestyle="dotted", label="_sd",
             alpha=0.50, ax=ax,
         )
         sns.lineplot(
-            x=tac.timepoints, y=tac.activity + tac.sd,
+            x=tac.timepoints[:_n], y=(tac.activity + tac.sd)[:_n],
             color=sd_color, linewidth="3", linestyle="dotted", label="_sd",
             alpha=0.50, ax=ax,
         )
     sns.lineplot(
-        x=tac.timepoints, y=tac.activity,
-        color=color, linewidth="5", linestyle="dashed", label=label,
+        x=tac.timepoints[:_n], y=tac.activity[:_n],
+        color=color, linewidth="5", linestyle=linestyle, label=label,
         alpha=0.50, ax=ax,
     )
+    if scatter:
+        sns.scatterplot(
+            x=tac.timepoints[:_n], y=tac.activity[:_n], label="_",
+            color=color, s=100, ax=ax,
+        )
 
 
 def plot_many_curves(primary_curves, primary_tac,
@@ -802,7 +812,7 @@ def plot_many_curves(primary_curves, primary_tac,
 
     sns.lineplot(
         data=all_boot_curves[all_boot_curves['t'] < 5.0],
-        x='t', y='activity', hue='curve_id', label=None,
+        x='t', y='activity', hue='curve_id',  # label=None,
         palette=biased_palette, linewidth=1, ax=axes[1]
     )
 
