@@ -8,6 +8,7 @@ import nilearn.image
 from scipy.stats import gaussian_kde
 import warnings
 import pickle
+import re
 from nibabel import Nifti1Image
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -545,3 +546,55 @@ def get_mask(mask_path, verbose=False):
     if verbose:
         print(f"  loaded {img.shape}-shaped array from '{mask_path.name}'.")
     return img, np.asarray(img.get_fdata()).astype(bool)
+
+
+""" Look through the python outputs, load each averaged PET file, and each
+    'best' mask, and Gjertrud's best mask for the same subject. Stack them
+    all up on the same plot and save it for review. """
+
+
+def alternate_selected(stare_output_path):
+    """ Find the log file, extract override lines, return override info. """
+    pat = (
+        r"centroid ([0-9]+)/([0-9]+): peak=([0-9.]+) @ t=([0-9]+)/([0-9]+), "
+        r"([0-9]+) blobs w/~([0-9.]+) voxels"
+    )
+    pattern = re.compile('alternate.*' + pat + r".*" + pat)
+    alternates = dict()
+    for log_path in stare_output_path.glob("stare*.log"):
+        with open(log_path, "r") as f:
+            for line in f:
+                match = re.search(pattern, line)
+                if match:
+                    if match.group(2) == '4':
+                        clust_step = 2
+                    else:
+                        clust_step = 1
+                    alternates[clust_step] = {
+                        'str': match.group(0)[12:],
+                        'orig': {
+                            'str': match.string[
+                                       match.regs[0][0]:match.regs[7][1] + 11
+                                   ],
+                            'label': int(match.group(1)),
+                            'k': int(match.group(2)),
+                            'peak': float(match.group(3)),
+                            't': int(match.group(4)),
+                            't_len': int(match.group(5)),
+                            'blobs': int(match.group(6)),
+                            'vox_per_blob': float(match.group(7)),
+                        },
+                        'final': {
+                            'str': match.string[
+                                       match.regs[8][0] - 9:match.regs[-1][-1]
+                                   ],
+                            'label': int(match.group(8)),
+                            'k': int(match.group(9)),
+                            'peak': float(match.group(10)),
+                            't': int(match.group(11)),
+                            't_len': int(match.group(12)),
+                            'blobs': int(match.group(13)),
+                            'vox_per_blob': float(match.group(14)),
+                        },
+                    }
+    return alternates
