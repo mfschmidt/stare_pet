@@ -108,6 +108,7 @@ def k_means_worker(arg_tuple):
     k_means.fit(data)
 
     log_messages.append(
+        f"  data mean {np.mean(data):0.2f}, sd {np.std(data):0.2f}\n"
         f"  lowest inertia == {k_means.inertia_:0.0f}"
         f" after {k_means.n_iter_} iterations"
         f" in {datetime.now() - worker_start}."
