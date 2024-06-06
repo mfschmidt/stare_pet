@@ -15,6 +15,8 @@ class Centroid(TimeActivityCurve):
             label,  # should be non-zero as zero indicates background
             k,
             source="",
+            missing_timepoints=None,
+            sd=None,
             labels=None,
             original_shape=None,
             blob_count=0,
@@ -27,7 +29,10 @@ class Centroid(TimeActivityCurve):
         """ Centroid constructor """
 
         # Specified properties
-        super().__init__(activity, timepoints, "k-means", name=name)
+        super().__init__(
+            activity, timepoints, source, missing_timepoints=missing_timepoints,
+            sd=sd, name=name
+        )
         self.label = label  # int, one of k clusters
         self.k = k  # int, how many clusters
         self.labels = labels  # ndarray shaped like (1000000,)
