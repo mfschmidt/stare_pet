@@ -85,6 +85,10 @@ def get_argument_parser():
              "'4mm' resamples to a resolution of 4mm isotropic."
     )
     parser.add_argument(
+        "--latest-usable-volume", type=int, default=0,
+        help="Run STARE only on the earliest N volumes specified. "
+    )
+    parser.add_argument(
         "--save-all-cluster-masks", action="store_true",
         help="Turn on to save nifti masks of all clusters, not just best. "
              "These masks will be saved in the 'debug/' directory."

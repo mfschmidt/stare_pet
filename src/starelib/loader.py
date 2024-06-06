@@ -133,16 +133,25 @@ def get_tacs(results):
 
     good_regions = [r for r in results.args.regions
                     if r in results.original_tacs.columns]
+
+    # Restrict usable volumes as specified in arguments
+    if results.args.latest_usable_volume != 0:
+        top_index = results.args.latest_usable_volume - 1
+        results.tacs = results.original_tacs.loc[0:top_index, good_regions]
+    else:
+        results.tacs = results.original_tacs
+
+    # Remove specific volumes specified in arguments
     if (
             (results.args.ignore_frames is not None) and
             (len(results.args.ignore_frames) > 0)
     ):
-        final_tac_df = results.original_tacs.drop(
+        results.tacs = results.tacs.drop(
             np.asarray(results.args.ignore_frames) - 1, axis=0
         )
-        results.tacs = final_tac_df[good_regions]
+        results.tacs = results.tacs[good_regions]
     else:
-        results.tacs = results.original_tacs[good_regions]
+        results.tacs = results.tacs[good_regions]
 
     return results
 
@@ -194,25 +203,40 @@ def get_mid_times(results):
         local_mid_times = results.original_mid_times
         results.source_mid_times_path = results.source_tacs_path
 
+    # Keep track of which volumes to avoid
+    ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
+
+    if (results.args.latest_usable_volume > 0) and local_mid_times is not None:
+        ignored_mid_times = pd.concat([
+            ignored_mid_times,
+            local_mid_times[
+                local_mid_times.index > results.args.latest_usable_volume - 1
+            ],
+        ])
+        plural = "s" if len(ignored_mid_times) > 1 else ""
+        results.logger.warning(
+            f"  {len(ignored_mid_times)} frame{plural} past "
+            f"n={results.args.latest_usable_volume} being ignored."
+        )
+
     if (len(results.args.ignore_frames) > 0) and local_mid_times is not None:
         plural = "s" if len(results.args.ignore_frames) > 1 else ""
         results.logger.warning(
-            f"  {len(results.args.ignore_frames)} frame{plural} being removed."
+            f"  {len(results.args.ignore_frames)} frame{plural} being ignored."
         )
-        ignored_mid_times = local_mid_times[
-            local_mid_times.index.isin(
-                [f - 1 for f in results.args.ignore_frames]
-            )
-        ]
-        # Replace mid_times AFTER the ignored time point has been stored.
-        final_mid_times = local_mid_times[
-            ~local_mid_times.index.isin(
-                [f - 1 for f in results.args.ignore_frames]
-            )
-        ]
-    else:
-        ignored_mid_times = pd.DataFrame(data=[], columns=["t", ], dtype=float)
-        final_mid_times = local_mid_times
+        ignored_mid_times = pd.concat([
+            ignored_mid_times,
+            local_mid_times[
+                local_mid_times.index.isin(
+                    [f - 1 for f in results.args.ignore_frames]
+                )
+            ],
+        ])
+
+    # Replace mid_times AFTER the ignored time points have been stored.
+    final_mid_times = local_mid_times[
+        ~local_mid_times.index.isin(ignored_mid_times.index)
+    ]
 
     if final_mid_times is not None and 't' in final_mid_times:
         results.original_mid_times = local_mid_times['t'].values
@@ -223,7 +247,7 @@ def get_mid_times(results):
 
 
 def get_individual_volumes(
-        input_path, output_path, subject_id, frames_to_ignore,
+        input_path, output_path, subject_id, frames_to_ignore, highest_frame,
         logger=None
 ):
     """ Find images, a volume for each mid-time
@@ -232,6 +256,7 @@ def get_individual_volumes(
     :param output_path: path to rewrite subjects
     :param subject_id: name of subject folder
     :param frames_to_ignore: list of frame numbers to avoid
+    :param highest_frame: the highest indexed frame to include
     :param logger: where to send messages
 
     :return dict: key-value dict with image data
@@ -260,7 +285,7 @@ def get_individual_volumes(
                 logger.warning(f"stare_pet uses sort ordering, #{i + 1}")
 
             # Store the image if it is not to be ignored.
-            if i + 1 in frames_to_ignore:
+            if (i + 1 in frames_to_ignore) or (i + 1 > highest_frame):
                 logger.warning(f"Frame {i + 1} exists, and will be ignored.")
             else:
                 logger.info(f"Reading volume '{img_file}' as frame {i + 1:02d}")
@@ -287,7 +312,10 @@ def get_individual_volumes(
                 filename=nifti_file.name,
                 prefix="orig",
                 frame=i + 1,
-                usable=((i + 1) not in frames_to_ignore),
+                usable=(
+                        ((i + 1) not in frames_to_ignore)
+                        and ((i + 1) <= highest_frame)
+                ),
             ))
             i += 1
 
@@ -297,7 +325,7 @@ def get_individual_volumes(
 
 def get_4D_data(
         img_file, output_path, subject_id, section,
-        ignored_volumes=None, logger=None
+        ignored_volumes=None, highest_volume=0, logger=None
 ):
     """ Find images, a volume for each mid-time
 
@@ -306,6 +334,7 @@ def get_4D_data(
     :param subject_id: name of subject folder
     :param section: report section for adding lines to the report
     :param list ignored_volumes: a list of volumes to pass over and not save
+    :param int highest_volume: a maximum index to include
     :param logger: where to send messages
 
     :return dict: key-value dict with image data
@@ -318,12 +347,15 @@ def get_4D_data(
     combined_image = nib.Nifti1Image.from_filename(img_file)
     original_shape = combined_image.shape
     logger.debug(f"  image contains {original_shape[3]} volumes.")
+    too_late_volumes = [v + 1 for v in range(original_shape[3])
+                        if v + 1 > highest_volume]
+    ignored_volumes = [] if ignored_volumes is None else ignored_volumes
 
     # Split the 4d data out into separate volumes.
     volumes = explode_4d_into_volumes(
         combined_image, output_path / "orig",
         name_template=subject_id + "_orig_{:02d}.nii.gz",
-        ignored_volumes=[] if ignored_volumes is None else ignored_volumes,
+        ignored_volumes=ignored_volumes + too_late_volumes,
         logger=logger
     )
 
@@ -455,7 +487,9 @@ def gather_data(results):
         # If the image was cached, it was cached without the ignored frames
         combined_image, volumes = get_4D_data(
             cached_img_file, args.output_path, args.subject, rpt_sect,
-            ignored_volumes=args.ignore_frames, logger=logger
+            ignored_volumes=args.ignore_frames,
+            highest_volume=args.latest_usable_volume,
+            logger=logger
         )
 
     # The next preference is a 4D image from the PICNIC pipeline.
@@ -468,7 +502,9 @@ def gather_data(results):
     if combined_image is None and picnic_img_file.exists():
         combined_image, volumes = get_4D_data(
             picnic_img_file, args.output_path, args.subject, rpt_sect,
-            ignored_volumes=args.ignore_frames, logger=logger
+            ignored_volumes=args.ignore_frames,
+            highest_volume=args.latest_usable_volume,
+            logger=logger
         )
 
     # Older FDG data are saved as one Analyze volume per time point.
@@ -484,7 +520,7 @@ def gather_data(results):
         # We can load a bunch of volumes.
         volumes = get_individual_volumes(
             args.input_path, args.output_path, args.subject,
-            args.ignore_frames, logger=logger
+            args.ignore_frames, args.latest_usable_volume, logger=logger
         )
         # Collect all the 3d image data into a single 4d structure.
         alerts = []
@@ -500,7 +536,9 @@ def gather_data(results):
     elif combined_image is None and len(moco_images) == 1:
         combined_image, volumes = get_4D_data(
             picnic_img_file, args.output_path, args.subject, rpt_sect,
-            ignored_volumes=args.ignore_frames, logger=logger
+            ignored_volumes=args.ignore_frames,
+            highest_volume=args.latest_usable_volume,
+            logger=logger
         )
 
     if volumes is None:
@@ -521,17 +559,22 @@ def gather_data(results):
              args.output_path / f"sub-{args.subject}_orig_mean.nii.gz")
 
     # Handle ignored frames, keeping both an original and a modified
-    if len(args.ignore_frames) > 0:
+    vols_to_skip = [i for i in range(combined_image.shape[3])
+                    if (i + 1 in args.ignore_frames)
+                    or (i + 1 > args.latest_usable_volume)]
+    if len(vols_to_skip) > 0:
         chunks = []
         begin = 0
-        for skipped in args.ignore_frames:
-            end = skipped - 1
-            chunks.append(combined_image.slicer[:, :, :, begin:end])
-            begin = skipped
-        chunks.append(combined_image.slicer[:, :, :, begin:])
+        for skipped in vols_to_skip:
+            end = skipped
+            if end > begin:
+                chunks.append(combined_image.slicer[:, :, :, begin:end])
+            begin = skipped + 1
+        if combined_image.shape[3] > begin:
+            chunks.append(combined_image.slicer[:, :, :, begin:])
         cropped_image = nib.concat_images(chunks, axis=3)
         logger.info(
-            f"Volumes [{', '.join([str(f) for f in args.ignore_frames])}] "
+            f"Volumes [{', '.join([str(f + 1) for f in vols_to_skip])}] "
             f"were ignored, so 4D image now contains {cropped_image.shape[3]} "
             f"volumes."
         )
