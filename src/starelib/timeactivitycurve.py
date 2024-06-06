@@ -197,7 +197,9 @@ class TimeActivityCurve:
         pre_peak_vasctac_uniform[(
             (pre_peak_vasctac_uniform < 0) | np.isnan(pre_peak_vasctac_uniform)
         )] = 0.0
-        num_post_peak = len(complete_time_uniform) - len(pre_peak_vasctac_uniform)
+        num_post_peak = (
+            len(complete_time_uniform) - len(pre_peak_vasctac_uniform)
+        )
         # We model only the pre-peak data, leave post-peak for later
         post_peak_vasctac_uniform = np.array([np.nan, ] * num_post_peak)
         boot_curve_activity_uniform = np.concatenate([
