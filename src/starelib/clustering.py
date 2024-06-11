@@ -150,10 +150,13 @@ def save_centroid_masks(centroids, fits, output_path, current_template,
                 resample_to=resample_to_template,
                 logger=logger,
             )
+            background_template = current_template
+            if resample_to_template is not None:
+                background_template = resample_to_template
             c_fig = plot_top_centroids_atlas(
                 nib.load(mask_path),
                 None,
-                resample_to_template,
+                background_template,
                 title="\n".join([
                     f"{output_path.parent.name}:",
                     f"step 1. orange. {centroid.label} of {centroid.k}, "
@@ -602,7 +605,9 @@ def two_step_cluster(results):
             )
 
         # Save out nifti masks (which ones conditional on verbosity)
-        resample_template = crop_3d_pet_img if data_are_resampled else None
+        resample_template = curr_3d_pet_img
+        if data_are_resampled:
+            resample_template = crop_3d_pet_img
         if results.args.save_all_cluster_masks or results.args.verbose > 2:
             save_centroid_masks(
                 results.cluster_centroids[step],
