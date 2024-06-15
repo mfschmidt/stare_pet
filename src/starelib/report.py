@@ -118,11 +118,13 @@ class Report:
         depth = 0
         # Check docker locations first, in case we're running in docker,
         # then wherever we were pip installed.
-        for here in ["/stare_pet", "/venv", Path(__file__).parent, ]:
+        for here in [
+            Path("/stare_pet"), Path("/venv"), Path(__file__).parent,
+        ]:
             self.logger.debug(
                 f"Finding version, looking for setup.cfg in {str(here)}"
             )
-            while depth < 5 and not Path(here / "setup.cfg").exists():
+            while depth < 5 and not (here / "setup.cfg").exists():
                 depth += 1
                 here = here.parent
                 self.logger.debug(
