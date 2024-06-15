@@ -5,6 +5,7 @@ import numpy as np
 import re
 import platform
 import multiprocessing
+import os
 
 
 # This can be overridden when someone creates a Report or Section object,
@@ -115,35 +116,38 @@ class Report:
 
     def find_version(self):
         depth = 0
-        here = Path(__file__).parent
-        self.logger.debug(
-            f"Finding version, looking for setup.cfg in {str(here)}"
-        )
-        while depth < 5 and not Path(here / "setup.cfg").exists():
-            depth += 1
-            here = here.parent
+        # Check docker locations first, in case we're running in docker,
+        # then wherever we were pip installed.
+        for here in ["/stare_pet", "/venv", Path(__file__).parent, ]:
             self.logger.debug(
-                f"  Finding version, looking for setup.cfg in {str(here)}"
+                f"Finding version, looking for setup.cfg in {str(here)}"
             )
-        if (here / "setup.cfg").exists():
-            self.logger.debug(
-                f"  Found config file at {str(here)}"
-            )
-            with open(here / "setup.cfg", "r") as f:
-                for line in f:
-                    match_name = re.match(
-                        r"name = ([A-Za-z_]*)", line
-                    )
-                    if match_name:
-                        self.app_name = match_name.group(1)
-                    match_version = re.match(
-                        r"version = ([0-9]\.[0-9]\.[0-9])", line
-                    )
-                    if match_version:
-                        self.app_version = match_version.group(1)
-            self.logger.debug(
-                f"  found '{self.app_name}', '{self.app_version}'."
-            )
+            while depth < 5 and not Path(here / "setup.cfg").exists():
+                depth += 1
+                here = here.parent
+                self.logger.debug(
+                    f"  Finding version, looking for setup.cfg in {str(here)}"
+                )
+            if (here / "setup.cfg").exists() and self.app_version == "N/A":
+                self.logger.debug(
+                    f"  Found config file at {str(here)}"
+                )
+                with open(here / "setup.cfg", "r") as f:
+                    for line in f:
+                        match_name = re.match(
+                            r"name = ([A-Za-z_]*)", line
+                        )
+                        if match_name:
+                            self.app_name = match_name.group(1)
+                        match_version = re.match(
+                            r"version = ([0-9]\.[0-9]\.[0-9])", line
+                        )
+                        if match_version:
+                            self.app_version = match_version.group(1)
+                self.logger.debug(
+                    f"  found '{self.app_name}', '{self.app_version}', "
+                    f"via {str(here / 'setup.cfg')}."
+                )
 
     @property
     def start_time(self):
@@ -211,9 +215,14 @@ class Report:
             f.write("</head>\n")
             f.write("<body>\n")
             f.write(f"<h1>{self.title}</h1>\n")
+            # First, try using hostname from environment, which is set if
+            # we're in a randomly named docker container. Otherwise,
+            # ask the platform for its hostname
             f.write(f"<p class='subtext'>Running {self.app_name} version "
-                    f"{self.app_version} on {platform.platform()}. "
-                    f"System has {multiprocessing.cpu_count()} CPUs.</p>\n")
+                    f"{self.app_version} on host "
+                    f"{os.environ.get('HOST_NAME', platform.node())} "
+                    f"({platform.platform()} with "
+                    f"{multiprocessing.cpu_count()} CPUs).</p>\n")
             for sect in sorted(self.sections, key=lambda x: x.start_time):
                 f.write(sect.html())
             f.write("<footer class='subtext'><br />STARE "

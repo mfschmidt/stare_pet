@@ -90,7 +90,7 @@ class Results:
             datefmt="%H:%M:%S %Z",
         ))
         terminal_handler.converter = time.localtime
-        if self._args.verbose > 1:
+        if (self._args.verbose > 1) or self._args.debug:
             terminal_handler.setLevel(logging.DEBUG)
         elif self._args.verbose > 0:
             terminal_handler.setLevel(logging.INFO)

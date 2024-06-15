@@ -1,14 +1,15 @@
 #!/bin/bash
 
-HOST_UID=$(id -u)
-HOST_GID=$(id -g)
-export HOST_UID
-export HOST_GID
+export HOST_NAME=$(hostname)
+export HOST_UID=$(id -u)
+export HOST_GID=$(id -g)
 docker run -it \
+  --env "HOST_NAME" \
   --user "${HOST_UID}:${HOST_GID}" \
   --workdir="${HOME}" \
   --volume="/etc/group:/etc/group:ro" \
   --volume="/etc/passwd:/etc/passwd:ro" \
   --volume="/etc/shadow:/etc/shadow:ro" \
   --volume="${HOME}:${HOME}" \
-  mfschmidt/stare:latest "$@"
+  --volume="/var/data:/var/data:rw" \
+  /venv/bin/python3 mfschmidt/stare:latest "$@"
