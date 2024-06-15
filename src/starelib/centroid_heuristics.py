@@ -191,6 +191,7 @@ def find_centroids(
                 k=k,
                 name=f"centroid {i + 1}/{k}",
                 source="k-means",
+                voxel_count=np.sum(kmeans_result['k_means'].labels_ == i),
                 # labels=k_means.labels_ + 1,
                 # blob_count=len(blob_ids),
                 # voxels_per_blob=np.mean(voxel_counts),

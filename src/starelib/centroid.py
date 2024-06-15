@@ -19,6 +19,7 @@ class Centroid(TimeActivityCurve):
             sd=None,
             labels=None,
             original_shape=None,
+            voxel_count=0,
             blob_count=0,
             voxels_per_blob=0.0,
             voxels_in_biggest_blobs=0.0,
@@ -40,6 +41,7 @@ class Centroid(TimeActivityCurve):
         self.best_in_k = best_in_k
         self.best_overall = best_overall
         self.source = source
+        self.voxel_count = voxel_count
         self.blob_count = blob_count
         self.voxels_per_blob = voxels_per_blob
         self.voxels_in_biggest_blobs = voxels_in_biggest_blobs
@@ -57,8 +59,9 @@ class Centroid(TimeActivityCurve):
         d["k"] = self.k
         d["best_in_k"] = self.best_in_k
         d["best_overall"] = self.best_overall
-        d["voxels_per_blob"] = self.voxels_per_blob
+        d["voxel_count"] = self.voxel_count
         d["blob_count"] = self.blob_count
+        d["voxels_per_blob"] = self.voxels_per_blob
         d["voxels_in_biggest_blobs"] = self.voxels_in_biggest_blobs
         d["source"] = self.source
         return d
