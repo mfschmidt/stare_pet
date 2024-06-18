@@ -502,6 +502,7 @@ def two_step_cluster(results):
             k=1,
             name=f"Forced best step 1. centroid 1/1",
             source="manual override",
+            voxel_count=np.sum(step_1_fake_flat_mask),
             labels=step_1_fake_flat_mask.astype(np.uint8),
         )
         # Prepare the actual data fed into step two.
