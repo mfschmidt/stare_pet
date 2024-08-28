@@ -242,7 +242,8 @@ def minimize_parameter_cost(results):
     rpt_sect = results.report.begin_section("Simulated Annealing")
 
     start_time = datetime.now()
-    logger.info(f"Starting simulated annealing at {start_time}")
+    logger.info(f"Starting {results.args.subject} simulated annealing "
+                f"at {start_time}")
 
     cache_file = f"sub-{results.args.subject}_step-5_minimized_params.pkl"
     sa_results = from_cache(
