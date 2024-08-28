@@ -143,7 +143,7 @@ def fit_vascular_mean_tac(results):
         )
         to_cache((successes, failures), results.args.cache_path, cache_file)
     else:
-        (success, failures) = cached_data
+        successes, failures = cached_data
         logger.info("  loaded cached step 3 decay model fits to save time")
 
     if results.args.debug and results.args.debug_path.exists():
