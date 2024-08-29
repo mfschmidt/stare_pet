@@ -135,7 +135,7 @@ def get_tacs(results):
                     if r in results.original_tacs.columns]
 
     # Restrict usable volumes as specified in arguments
-    if results.args.latest_usable_volume != 0:
+    if results.args.latest_usable_volume > 0:
         top_index = results.args.latest_usable_volume - 1
         results.tacs = results.original_tacs.loc[0:top_index, good_regions]
     else:
@@ -285,7 +285,10 @@ def get_individual_volumes(
                 logger.warning(f"stare_pet uses sort ordering, #{i + 1}")
 
             # Store the image if it is not to be ignored.
-            if (i + 1 in frames_to_ignore) or (i + 1 > highest_frame):
+            if (
+                    (i + 1 in frames_to_ignore) or
+                    ((highest_frame > 0) and (i + 1 > highest_frame))
+            ):
                 logger.warning(f"Frame {i + 1} exists, and will be ignored.")
             else:
                 logger.info(f"Reading volume '{img_file}' as frame {i + 1:02d}")
@@ -314,7 +317,8 @@ def get_individual_volumes(
                 frame=i + 1,
                 usable=(
                         ((i + 1) not in frames_to_ignore)
-                        and ((i + 1) <= highest_frame)
+                        and
+                        ((highest_frame < 1) or ((i + 1) <= highest_frame))
                 ),
             ))
             i += 1
@@ -348,7 +352,7 @@ def get_4D_data(
     original_shape = combined_image.shape
     logger.debug(f"  image contains {original_shape[3]} volumes.")
     too_late_volumes = [v + 1 for v in range(original_shape[3])
-                        if v + 1 > highest_volume]
+                        if ((highest_volume > 0) and (v + 1 > highest_volume))]
     ignored_volumes = [] if ignored_volumes is None else ignored_volumes
 
     # Split the 4d data out into separate volumes.
@@ -559,9 +563,14 @@ def gather_data(results):
              args.output_path / f"sub-{args.subject}_orig_mean.nii.gz")
 
     # Handle ignored frames, keeping both an original and a modified
-    vols_to_skip = [i for i in range(combined_image.shape[3])
-                    if (i + 1 in args.ignore_frames)
-                    or (i + 1 > args.latest_usable_volume)]
+    vols_to_skip = [
+        i for i in range(combined_image.shape[3])
+        if (
+            (i + 1 in args.ignore_frames) or
+            ((args.latest_usable_volume > 0) and
+             (i + 1 > args.latest_usable_volume))
+        )
+    ]
     if len(vols_to_skip) > 0:
         chunks = []
         begin = 0
@@ -573,10 +582,14 @@ def gather_data(results):
         if combined_image.shape[3] > begin:
             chunks.append(combined_image.slicer[:, :, :, begin:])
         cropped_image = nib.concat_images(chunks, axis=3)
+        if len(vols_to_skip) == 1:
+            vol_str, verb_str = "Volume", "was"
+        else:
+            vol_str, verb_str = "Volumes", "were"
         logger.info(
-            f"Volumes [{', '.join([str(f + 1) for f in vols_to_skip])}] "
-            f"were ignored, so 4D image now contains {cropped_image.shape[3]} "
-            f"volumes."
+            f"{vol_str} [{', '.join([str(f + 1) for f in vols_to_skip])}] "
+            f"{verb_str} ignored, so 4D image now contains "
+            f"{cropped_image.shape[3]} volumes."
         )
     else:
         cropped_image = combined_image
