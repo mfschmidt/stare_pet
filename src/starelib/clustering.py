@@ -428,6 +428,11 @@ def two_step_cluster(results):
     logger = results.logger
     rpt_sect = results.report.begin_section("Two-level k-means clustering")
 
+    # Just for debug/curiosity, we can also cluster via PCA and ICA.
+    # This just saves some component maps, doesn't affect anything else.
+    if results.args.decompose_components:
+        decompose_components(results, logger)
+
     # Predetermined configuration, hardcoded here
     step_one_ks = list(range(6, 40, 4))
     step_two_ks = [4, ]
@@ -663,11 +668,6 @@ def two_step_cluster(results):
                     results.args.debug_path / "masks" /
                     filename.replace("_vas", f"_k-{k}_vas")
                 )
-
-    # Just for debug/curiosity, we can also cluster via PCA and ICA.
-    # This just saves some component maps, doesn't affect anything else.
-    if results.args.decompose_components:
-        decompose_components(results, logger)
 
     rpt_sect.end()
     results.write_report()
