@@ -9,10 +9,15 @@ from pathlib import Path
 import nibabel as nib
 from nilearn import image
 from nilearn.plotting import plot_roi
+from math import ceil
 
 from .timeactivitycurve import TimeActivityCurve
 from .util import get_kde_fwhm_points
 from .colors import bat_palette, freesurfer_palette
+from .centroid_heuristics import (
+    likely_noise, likely_irreversible, likely_vascular, likely_peripheral
+)
+
 
 # One global random number generator should be sufficient
 rng = np.random.default_rng()
@@ -163,7 +168,7 @@ def plot_vascular_tacs(
         sns.lineplot(
             data=data[data['best_in_k']], x="t", y="activity",
             hue='name', palette=vascs, alpha=0.5, linewidth=1,
-            ax=axes
+            label=f"Best of k", ax=axes
         )
     if tall:
         # clear all legend labels, allowing the next lineplot to make a new one.
@@ -177,8 +182,12 @@ def plot_vascular_tacs(
         sns.lineplot(
             data=data[data['best_overall']], x="t", y="activity",
             color=highlight_color, linestyle=":", linewidth=6, alpha=0.5,
-            label=f"Best (k-{best_k:02d}-{best_label:02d})", ax=axes
+            label=f"Best overall (k-{best_k:02d}-{best_label:02d})", ax=axes
         )
+    else:
+        # If no centroids are labeled best, the legend will be empty; fill it.
+        sns.lineplot(x=(0.0, 0.0, ), y=(0.0, 0.0, ), alpha=0.0,
+                     label="No best centroid", ax=axes)
 
     # Finish off the details so the plot is readable.
     axes.set_xlabel("Minutes")  # ranges 0 to 60
@@ -221,41 +230,52 @@ def prep_data(data):
 
 
 def plot_top_centroids_atlas(
-        step_1_mask_img, step_2_mask_img, pet4d_img,
+        step_1_mask_img, step_2_mask_img, pet4d_img, color_map = None,
         title="", figsize=(8, 4)
 ):
     """ Plot the PET average background and masks over the top.
 
     """
 
-    mean_pet_img = image.mean_img(pet4d_img)
+    if (
+            (step_1_mask_img is None and step_2_mask_img is None) or
+            pet4d_img is None
+    ):
+        print(f"ERROR: Trying to 'plot_top_centroids_atlas' without images!")
+        print(f"     : step_1_mask_img is '{str(step_1_mask_img)}")
+        print(f"     : step_2_mask_img is '{str(step_2_mask_img)}")
+        print(f"     : pet4d_img is '{str(pet4d_img)}")
+        return plt.figure()
 
-    # Step 2 is necessarily a subset of step 1, so we can just add the ones.
-    if step_2_mask_img is None:
-        atlas_combo_img = nib.Nifti1Image(
-            step_1_mask_img.get_fdata(),
-            affine=mean_pet_img.affine,
-            dtype=np.uint8,
-        )
+    # Extract image data, or create empty data to fill-in
+    mean_pet_img = image.mean_img(pet4d_img)
+    if step_1_mask_img is None:
+        step_1_data = np.zeros(mean_pet_img.shape)
+    elif len(step_1_mask_img.shape) > 3:
+        step_1_data = image.mean_img(step_1_mask_img).get_fdata()
     else:
-        if len(step_1_mask_img.shape) > 3:
-            step_1_data = image.mean_img(step_1_mask_img).get_fdata()
-        else:
-            step_1_data = step_1_mask_img.get_fdata()
-        if len(step_2_mask_img.shape) > 3:
-            step_2_data = image.mean_img(step_2_mask_img).get_fdata()
-        else:
-            step_2_data = step_2_mask_img.get_fdata()
-        atlas_combo_img = nib.Nifti1Image(
-            step_1_data + step_2_data,
-            affine=mean_pet_img.affine, dtype=np.uint8,
-        )
-    two_grade_cmap = ListedColormap(['orange', 'red', ])
+        step_1_data = step_1_mask_img.get_fdata()
+    if step_2_mask_img is None:
+        step_2_data = np.zeros(mean_pet_img.shape)
+    elif len(step_2_mask_img.shape) > 3:
+        step_2_data = image.mean_img(step_2_mask_img).get_fdata()
+    else:
+        step_2_data = step_2_mask_img.get_fdata()
+
+    # Build the plottable image with both masks
+    atlas_combo_img = nib.Nifti1Image(
+        step_1_data + step_2_data,
+        affine=mean_pet_img.affine,
+        dtype=np.uint8,
+    )
+    if color_map is None:
+        color_map = ListedColormap(['orange', 'red', ])
+
     fig = plt.figure(figsize=figsize)
     axes = fig.add_axes((0, 0, 1, 1, ))
     display = plot_roi(
         roi_img=atlas_combo_img, bg_img=mean_pet_img,
-        cmap=two_grade_cmap, black_bg=False, axes=axes,
+        cmap=color_map, black_bg=False, axes=axes,
     )
     display.title(title, color='black', bgcolor='white')
 
@@ -1146,3 +1166,146 @@ def plot_cluster_comparisons(
     ax_strip.set_yticks([])
     ax_strip.set_yticklabels([])
     ax_strip.set_ylabel("")
+
+
+def line_props_from_tac(tac):
+    """ Provide line styles for different classes of TAC. """
+
+    plot_color = 'black'
+    line_style = "."
+    if likely_vascular(tac):
+        plot_color = 'green'
+        line_style = "-"
+    elif likely_noise(tac):
+        plot_color = 'gray'
+        line_style = ":"
+    elif likely_irreversible(tac):
+        plot_color = 'red'
+        line_style = ":"
+    elif likely_peripheral(tac):
+        plot_color = 'orange'
+        line_style = "--"
+
+    return dict(color=plot_color, linestyle=line_style)
+
+
+def tacs_from_ics(mixing_matrix, original_data):
+    """ Return positive and negative components of each col of a mixing matrix.
+
+        Each component may correlate negatively or positively with the
+        original image, so we need to identify which one may be of use to
+        us. This function doesn't diagnose anything, but extracts the
+        positive and negative thresholds separately and returns them both.
+    """
+
+    tacs = {"hi": dict(), "lo": dict(), "all": dict(), }
+    for i in range(mixing_matrix.shape[1]):
+        _mat = mixing_matrix[:, i]
+        _mu, _sd = np.mean(_mat), np.std(_mat)
+        for direction in ("hi", "lo", "all",):
+            # Create a 2-SD threshold mask
+            if direction == "hi":
+                _mask = _mat > _mu + _sd + _sd
+            elif direction == "lo":
+                _mask = _mat < _mu - _sd - _sd
+            else:
+                _mask = ((_mat > _mu + _sd + _sd) | (_mat < _mu - _sd - _sd))
+            # Format it as a TimeActivityCurve
+            _tac = TimeActivityCurve(
+                np.mean(original_data[_mask], axis=0),
+                list(range(original_data.shape[1])),
+                f"ica {direction}"
+            )
+            # Store it in the dict
+            tacs[direction][i] = _tac
+
+    return tacs
+
+
+def plot_components(mixing_matrix, original_data, title="", save_as=None):
+    """ Plot each component in the mixing matrix.
+
+        :param mixing_matrix: The mixing matrix from fitting components
+        :param original_data: The 2D data used to fit components
+        :param str title: The title of the plot
+        :param save_as: If plot should be saved, the name of the file
+    """
+
+    if mixing_matrix.shape[1] < 4:
+        n_rows, n_cols = 1, mixing_matrix.shape[1]
+    elif mixing_matrix.shape[1] < 9:
+        n_rows, n_cols = 2, ceil(mixing_matrix.shape[1] / 2)
+    else:
+        n_rows, n_cols = 3, ceil(mixing_matrix.shape[1] / 3)
+    fig_tacs, axes_tacs = plt.subplots(
+        nrows=n_rows, ncols=n_cols, sharex='all', sharey='all', figsize=(11, 5)
+    )
+    tacs = tacs_from_ics(mixing_matrix, original_data)
+    i = 0
+    for row in range(n_rows):
+        for col in range(n_cols):
+            if n_rows == 1:
+                _ax = axes_tacs[i]
+            else:
+                _ax = axes_tacs[row, col]
+            if i < mixing_matrix.shape[1]:
+                tac_hi = tacs["hi"][i]
+                tac_lo = tacs["lo"][i]
+                sns.lineplot(tac_hi.activity, ax=_ax,
+                             **line_props_from_tac(tac_hi))
+                sns.lineplot(tac_lo.activity, ax=_ax,
+                             **line_props_from_tac(tac_lo))
+                _ax.set_title(f"{title[0:2]} {i}")
+                if likely_vascular(tac_hi):
+                    tacs[(i, "pos")] = tac_hi
+                if likely_vascular(tac_lo):
+                    tacs[(i, "neg")] = tac_lo
+            i += 1
+
+    fig_tacs.suptitle(title)
+
+    if save_as is not None:
+        fig_tacs.savefig(save_as)
+
+    return fig_tacs
+
+
+def plot_mixing_matrix(mixing_matrix, title="A", save_as=None):
+    """ Plot the mixing matrix itself.
+
+        :param mixing_matrix: The mixing matrix from fitting components
+        :param str title: The title of the plot
+        :param save_as: If plot should be saved, the name of the file
+    """
+
+    fig_mixing, axes_mixing = plt.subplots(figsize=(3, 2.5))
+    sns.heatmap(mixing_matrix, ax=axes_mixing)
+    axes_mixing.set_title(title)
+
+    if save_as is not None:
+        fig_mixing.savefig(save_as)
+    return fig_mixing
+
+
+def plot_pca_variance(pca_transformer, title="", save_as=None):
+    """ Plot the mixing matrix itself.
+
+        :param pca_transformer: The fit PCA model from scikit-learn
+        :param str title: The title of the plot
+        :param save_as: If plot should be saved, the name of the file
+    """
+
+    plot_data = pd.DataFrame({
+        "iter": [i for i in range(pca_transformer.n_components_)],
+        "var_exp": pca_transformer.explained_variance_ratio_,
+    })
+
+    fig_var_exp, axes_var_exp = plt.subplots(figsize=(3, 2.5))
+    sns.barplot(
+        data=plot_data, x="iter", y="var_exp", ax=axes_var_exp
+    )
+    axes_var_exp.set_title(title)
+
+    if save_as is not None:
+        fig_var_exp.savefig(save_as)
+    return fig_var_exp

@@ -663,8 +663,11 @@ def two_step_cluster(results):
                     results.args.debug_path / "masks" /
                     filename.replace("_vas", f"_k-{k}_vas")
                 )
-                filename_s_k = filename.replace("_vas", f"_k-{k}_vas")
-                fig_s_k.savefig(results.args.debug_path / filename_s_k)
+
+    # Just for debug/curiosity, we can also cluster via PCA and ICA.
+    # This just saves some component maps, doesn't affect anything else.
+    if results.args.decompose_components:
+        decompose_components(results, logger)
 
     rpt_sect.end()
     results.write_report()
