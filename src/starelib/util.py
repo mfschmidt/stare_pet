@@ -598,3 +598,20 @@ def alternate_selected(stare_output_path):
                         },
                     }
     return alternates
+
+
+def stat_str(a):
+    """ Build a descriptive string about the values in the array provided.
+
+        :param np.array a: Any numeric array to be summarized
+    """
+
+    _mu, _sd = np.mean(a), np.std(a)
+    _lo, _hi = np.min(a), np.max(a)
+    lo_95 = _mu - _sd - _sd
+    hi_95 = _mu + _sd + _sd
+    return (
+        f"mean {_mu:0.1f} +/- sd {_sd:0.1f}, "
+        f"95% [{lo_95:0.1f} to {hi_95:0.1f}] "
+        f"range [{_lo:0.1f} to {_hi:0.1f}]"
+    )
