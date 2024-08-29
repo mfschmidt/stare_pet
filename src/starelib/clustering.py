@@ -6,6 +6,7 @@ import nibabel as nib
 from nilearn import image
 from datetime import datetime
 import pickle
+from matplotlib.colors import ListedColormap
 
 from .util import flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d
 from .util import from_cache, to_cache
@@ -16,6 +17,7 @@ from .centroid_heuristics import (
     find_vascular_centroids, likely_irreversible_linear,
     consider_alternate_clusters
 )
+from .components import decompose_components
 
 
 def make_atlas_and_mask(
@@ -126,7 +128,7 @@ def best_of(centroids):
             return centroid
 
 
-def save_centroid_masks(centroids, fits, output_path, current_template,
+def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                         resample_to_template=None, logger=None):
     """ Save centroid masks to disk, return the best one
 
@@ -134,6 +136,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template,
         :param dict fits: k-means fit results for extracting labels
         :param Path output_path: The path for writing out masks
         :param Nifti1Image current_template: An image in cropped cluster space
+        :param int step: Step 1 or 2 clustering
         :param Nifti1Image resample_to_template: Resample clusters to this space
         :param logging.logger logger: write output to logger if available
 
@@ -141,33 +144,56 @@ def save_centroid_masks(centroids, fits, output_path, current_template,
 
     logger = logging.getLogger("STARE") if logger is None else logger
 
-    for centroid in centroids:
-        # Specifying out_path causes masks to be written to disk.
-        if output_path.exists():
-            atlas_path, mask_path = make_atlas_and_mask(
+    # Specifying out_path causes masks to be written to disk.
+    if output_path.exists():
+        mask_path = output_path / "masks"
+        mask_path.mkdir(exist_ok=True)
+        for centroid in centroids:
+            if centroid.features.get("likely_vascular", False):
+                this_mask_path = mask_path / "vascular"
+            elif centroid.features.get("likely_irreversible", False):
+                this_mask_path = mask_path / "irreversible"
+            elif centroid.features.get("likely_noise", False):
+                this_mask_path = mask_path / "noise"
+            else:
+                this_mask_path = mask_path / "other"
+            this_mask_path.mkdir(exist_ok=True)
+            atlas_nifti_file_path, mask_nifti_file_path = make_atlas_and_mask(
                 centroid, fits[centroid.k].labels_ + 1, current_template,
-                out_path=output_path,
+                out_path=this_mask_path,
                 resample_to=resample_to_template,
                 logger=logger,
             )
             background_template = current_template
             if resample_to_template is not None:
                 background_template = resample_to_template
-            c_fig = plot_top_centroids_atlas(
-                nib.load(mask_path),
-                None,
-                background_template,
-                title="\n".join([
-                    f"{output_path.parent.name}:",
-                    f"step 1. orange. {centroid.label} of {centroid.k}, "
-                    f"peak {centroid.peak_value:0.2f} "
-                    f"@ t # {centroid.peak_index}",
-                ]),
-            )
             filename = (f"sub-{output_path.parent.name}_step-1_"
                         f"k-{centroid.k}_label-{centroid.label}_"
                         f"vascular_cluster_mask.png")
-            c_fig.savefig(output_path / filename)
+            if step == 1:
+                plot_top_centroids_atlas(
+                    nib.load(mask_nifti_file_path), None, background_template,
+                    color_map=ListedColormap(['orange', 'red', ]),
+                    title="\n".join([
+                        f"{output_path.parent.name}:",
+                        f"step {step}. orange. {centroid.label} of {centroid.k}"
+                        f", peak {centroid.peak_value:0.2f} "
+                        f"@ t # {centroid.peak_index}"
+                        f"({centroid.voxel_count} voxels)",
+                    ]),
+                ).savefig(this_mask_path / filename)
+            elif step == 2:
+                plot_top_centroids_atlas(
+                    None, nib.load(mask_nifti_file_path), background_template,
+                    color_map=ListedColormap(['orange', 'red', ]),
+                    title="\n".join([
+                        f"{output_path.parent.name}:",
+                        f"step {step}. red. {centroid.label} of {centroid.k}"
+                        f", peak {centroid.peak_value:0.2f} "
+                        f"@ t # {centroid.peak_index} "
+                        f"({centroid.voxel_count} voxels)",
+                    ]),
+                ).savefig(this_mask_path / filename)
 
 
 def tabulate_centroids(centroids, added_columns=None):
@@ -193,7 +219,12 @@ def tabulate_centroids(centroids, added_columns=None):
 def load_or_calculate_clusters(
         results, cluster_function, source_4d_image, ks, step, logger=None
 ):
-    """ Treat data as either 4D Nifti1Image or 2D array """
+    """ Treat data as either 4D Nifti1Image or 2D array
+
+        :param results: Results object
+        :param cluster_function: function that takes k and label as input and
+        :param source_4d_image: 4D PET activity image, may differ from i
+    """
 
     # If prior models were saved to disk, load them rather than running.
     cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
@@ -615,6 +646,7 @@ def two_step_cluster(results):
                 results.cluster_model_fits[step],
                 results.args.debug_path,
                 curr_3d_pet_img,
+                step=step,
                 resample_to_template=resample_template,
                 logger=logger,
             )
@@ -625,8 +657,11 @@ def two_step_cluster(results):
             for k in unique_ks:
                 cs_in_k = [c for c in results.cluster_centroids[step]
                            if c.k == k]
-                fig_s_k = plot_vascular_tacs(
+                plot_vascular_tacs(
                     cs_in_k, draw_non_vascular=True, tall=True
+                ).savefig(
+                    results.args.debug_path / "masks" /
+                    filename.replace("_vas", f"_k-{k}_vas")
                 )
                 filename_s_k = filename.replace("_vas", f"_k-{k}_vas")
                 fig_s_k.savefig(results.args.debug_path / filename_s_k)
