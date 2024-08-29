@@ -65,10 +65,12 @@ def decompose_components(results, logger):
         :param logger: a logger for output handling
     """
 
+    # For comparison with k-means and for alignment with mid-times,
+    # we need to use the cropped_4D rather than original.
     out_path = results.args.debug_path / "components"
     out_path.mkdir(exist_ok=True)
-    _img_4d = results.input_4D
-    _img_3d = mean_img(results.input_4D)
+    _img_4d = results.cropped_4D
+    _img_3d = mean_img(_img_4d)
     max_t = _img_4d.shape[3] - 1
 
     # Prep the source PET data
