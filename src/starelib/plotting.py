@@ -1257,9 +1257,9 @@ def plot_components(mixing_matrix, original_data,
             if i < mixing_matrix.shape[1]:
                 tac_hi = tacs["hi"][i]
                 tac_lo = tacs["lo"][i]
-                sns.lineplot(tac_hi.activity, ax=_ax,
+                sns.lineplot(x=tac_hi.timepoints, y=tac_hi.activity, ax=_ax,
                              **line_props_from_tac(tac_hi))
-                sns.lineplot(tac_lo.activity, ax=_ax,
+                sns.lineplot(x=tac_hi.timepoints, y=tac_lo.activity, ax=_ax,
                              **line_props_from_tac(tac_lo))
                 _ax.set_title(f"{title[0:2]} {i}")
                 if likely_vascular(tac_hi):
