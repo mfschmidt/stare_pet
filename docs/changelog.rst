@@ -4,6 +4,11 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.9.5, 2024-08-29
+
+- Introduce principal and independent components as a supplementary debugging
+  feature that is not yet included in any STARE algorithms.
+
 Version 0.9.1, 2024-06-05
 
 - Allow shortening timespan to facilitate time stability analyses.

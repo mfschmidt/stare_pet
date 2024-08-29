@@ -16,7 +16,7 @@ fonttools==4.46.0
     # via matplotlib
 humanize==4.9.0
     # via stare-pet (setup.py)
-idna==3.6
+idna==3.7
     # via requests
 joblib==1.4.2
     # via
