@@ -114,7 +114,8 @@ def decompose_components(results, logger):
 
         # Plot the TAC of each component
         comp_plot_filename = save_path.name.replace(".nii.gz", "_comps.png")
-        _fig = plot_components(a, _x, title="ICA-component-masked PET TACs",
+        _fig = plot_components(a, _x, results.mid_times,
+                               title="ICA-component-masked PET TACs",
                                save_as=save_path.parent / comp_plot_filename)
         logger.info(f"  Plotted component TACs as {comp_plot_filename}")
 

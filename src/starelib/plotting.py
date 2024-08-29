@@ -1189,7 +1189,7 @@ def line_props_from_tac(tac):
     return dict(color=plot_color, linestyle=line_style)
 
 
-def tacs_from_ics(mixing_matrix, original_data):
+def tacs_from_ics(mixing_matrix, original_data, mid_times=None):
     """ Return positive and negative components of each col of a mixing matrix.
 
         Each component may correlate negatively or positively with the
@@ -1197,6 +1197,10 @@ def tacs_from_ics(mixing_matrix, original_data):
         us. This function doesn't diagnose anything, but extracts the
         positive and negative thresholds separately and returns them both.
     """
+
+    if mid_times is None:
+        # Just fill in a vanilla sequence if we don't know actual timing
+        mid_times = list(range(original_data.shape[1]))
 
     tacs = {"hi": dict(), "lo": dict(), "all": dict(), }
     for i in range(mixing_matrix.shape[1]):
@@ -1213,7 +1217,7 @@ def tacs_from_ics(mixing_matrix, original_data):
             # Format it as a TimeActivityCurve
             _tac = TimeActivityCurve(
                 np.mean(original_data[_mask], axis=0),
-                list(range(original_data.shape[1])),
+                mid_times,
                 f"ica {direction}"
             )
             # Store it in the dict
@@ -1222,11 +1226,13 @@ def tacs_from_ics(mixing_matrix, original_data):
     return tacs
 
 
-def plot_components(mixing_matrix, original_data, title="", save_as=None):
+def plot_components(mixing_matrix, original_data,
+                    mid_times=None, title="", save_as=None):
     """ Plot each component in the mixing matrix.
 
         :param mixing_matrix: The mixing matrix from fitting components
         :param original_data: The 2D data used to fit components
+        :param mid_times: TAC mid-times for proper TAC spacing
         :param str title: The title of the plot
         :param save_as: If plot should be saved, the name of the file
     """
@@ -1240,7 +1246,7 @@ def plot_components(mixing_matrix, original_data, title="", save_as=None):
     fig_tacs, axes_tacs = plt.subplots(
         nrows=n_rows, ncols=n_cols, sharex='all', sharey='all', figsize=(11, 5)
     )
-    tacs = tacs_from_ics(mixing_matrix, original_data)
+    tacs = tacs_from_ics(mixing_matrix, original_data, mid_times)
     i = 0
     for row in range(n_rows):
         for col in range(n_cols):
