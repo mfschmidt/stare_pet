@@ -69,34 +69,36 @@ def decompose_components(results, logger):
     out_path.mkdir(exist_ok=True)
     _img_4d = results.input_4D
     _img_3d = mean_img(results.input_4D)
-    t_dim = _img_4d.shape[3]
+    max_t = _img_4d.shape[3] - 1
 
     # Do the decompositions
     _x = flatten_4d_to_2d(_img_4d.get_fdata())
     _pca_6, _pca_s_6, _pca_a_6 = run_pca(_x, 6)
     _ica_6, _ica_s_6, _ica_a_6 = run_ica(_x, 6)
-    _ica_n, _ica_s_n, _ica_a_n = run_ica(_x, t_dim)
+    _ica_n, _ica_s_n, _ica_a_n = run_ica(_x, max_t)
 
     # Save the results as nifti files, and some stats as a csv
     with open(out_path / "component_stats.csv", "w") as f:
-        f.write("algorithm,components,component,mean,sd,min,max\n")
+        f.write("algorithm,components,component,row,cols,mean,sd,min,max\n")
     for t, a, s, save_path, num_components in [
         (_pca_6, _pca_a_6, _pca_s_6, out_path / "pca_6.nii.gz", 6),
         (_ica_6, _ica_a_6, _ica_s_6, out_path / "ica_6.nii.gz", 6),
-        (_ica_n, _ica_a_n, _ica_s_n, out_path / f"ica_{t_dim}.nii.gz", t_dim),
+        (_ica_n, _ica_a_n, _ica_s_n, out_path / f"ica_{max_t}.nii.gz", max_t),
     ]:
         # Write stats to csv file
         with open(out_path / "component_stats.csv", "a") as f:
-            for i in a.shape[1]:
+            for i in range(a.shape[1]):
                 vals = a[:, i].ravel()
                 f.write(",".join([
                     save_path.name[0:3],
                     str(num_components),
                     str(i),
-                    f"{np.mean(vals):0.4f}",
-                    f"{np.std(vals):0.4f}",
-                    f"{np.min(vals):0.4f}",
-                    f"{np.max(vals):0.4f}",
+                    str(a.shape[0]),
+                    str(a.shape[1]),
+                    f"{np.mean(vals):0.6f}",
+                    f"{np.std(vals):0.6f}",
+                    f"{np.min(vals):0.6f}",
+                    f"{np.max(vals):0.6f}",
                 ]) + "\n")
 
         # Write maps to nifti files
