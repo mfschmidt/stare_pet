@@ -7,6 +7,7 @@ from nilearn import image
 from datetime import datetime
 import pickle
 from matplotlib.colors import ListedColormap
+import matplotlib.pyplot as plt
 
 from .util import flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d
 from .util import from_cache, to_cache
@@ -171,7 +172,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                         f"k-{centroid.k}_label-{centroid.label}_"
                         f"vascular_cluster_mask.png")
             if step == 1:
-                plot_top_centroids_atlas(
+                fig = plot_top_centroids_atlas(
                     nib.load(mask_nifti_file_path), None, background_template,
                     color_map=ListedColormap(['orange', 'red', ]),
                     title="\n".join([
@@ -181,9 +182,11 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                         f"@ t # {centroid.peak_index}"
                         f"({centroid.voxel_count} voxels)",
                     ]),
-                ).savefig(this_mask_path / filename)
+                )
+                fig.savefig(this_mask_path / filename)
+                plt.close(fig)
             elif step == 2:
-                plot_top_centroids_atlas(
+                fig = plot_top_centroids_atlas(
                     None, nib.load(mask_nifti_file_path), background_template,
                     color_map=ListedColormap(['orange', 'red', ]),
                     title="\n".join([
@@ -193,7 +196,9 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                         f"@ t # {centroid.peak_index} "
                         f"({centroid.voxel_count} voxels)",
                     ]),
-                ).savefig(this_mask_path / filename)
+                )
+                fig.savefig(this_mask_path / filename)
+                plt.close(fig)
 
 
 def tabulate_centroids(centroids, added_columns=None):
@@ -609,6 +614,7 @@ def two_step_cluster(results):
     top_centroid_fig.savefig(results.args.fig_path / filename)
     caption = "Step one (orange) and step two (red) vascular clusters"
     rpt_sect.add_figure(results.args.fig_path / filename, caption)
+    plt.close(top_centroid_fig)
 
     # Plot the TACs from the first k-means step
     for step in [1, 2, ]:
@@ -662,9 +668,12 @@ def two_step_cluster(results):
             for k in unique_ks:
                 cs_in_k = [c for c in results.cluster_centroids[step]
                            if c.k == k]
-                pickle.dump(cs_in_k,
-                            results.args.debug_path / "masks" /
-                            f"centroids_step-{step}_k-{k}.pkl")
+                pickle.dump(
+                    cs_in_k,
+                    open(results.args.debug_path / "masks" /
+                         f"centroids_step-{step}_k-{k}.pkl",
+                         "wb")
+                )
                 plot_vascular_tacs(
                     cs_in_k, draw_non_vascular=True, tall=True
                 ).savefig(
