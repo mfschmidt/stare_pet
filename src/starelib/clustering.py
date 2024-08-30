@@ -662,6 +662,9 @@ def two_step_cluster(results):
             for k in unique_ks:
                 cs_in_k = [c for c in results.cluster_centroids[step]
                            if c.k == k]
+                pickle.dump(cs_in_k,
+                            results.args.debug_path / "masks" /
+                            f"centroids_step-{step}_k-{k}.pkl")
                 plot_vascular_tacs(
                     cs_in_k, draw_non_vascular=True, tall=True
                 ).savefig(

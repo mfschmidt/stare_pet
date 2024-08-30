@@ -164,7 +164,15 @@ def plot_vascular_tacs(
         )
 
     # Next, plot the centroids that are the best for their k-means group
-    if len(data[data['best_in_k']]) > 0:
+    # print(f"DEBUG: plotting {len(data[data['best_in_k']])} TACs")
+    if len(data[data['best_in_k']]) > 1:
+        # Each line will be labelled automatically by its hue/palette
+        sns.lineplot(
+            data=data[data['best_in_k']], x="t", y="activity",
+            hue='name', palette=vascs, alpha=0.5, linewidth=1, ax=axes
+        )
+    elif len(data[data['best_in_k']]) > 0:
+        # This single line will not be labelled and needs help
         sns.lineplot(
             data=data[data['best_in_k']], x="t", y="activity",
             hue='name', palette=vascs, alpha=0.5, linewidth=1,
