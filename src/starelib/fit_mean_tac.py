@@ -22,7 +22,7 @@ def select_best_fit(fits, weighted=True):
     for fit in fits:
         if best_fit is None:
             best_fit = fit
-        elif fit.get(cost_term, np.Inf) < best_fit.get(cost_term, 0.0):
+        elif fit.get(cost_term, np.inf) < best_fit.get(cost_term, 0.0):
             best_fit = fit
 
     return best_fit
