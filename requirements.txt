@@ -14,7 +14,7 @@ cycler==0.12.1
     # via matplotlib
 fonttools==4.46.0
     # via matplotlib
-humanize==4.9.0
+humanize==4.10.0
     # via stare-pet (setup.py)
 idna==3.7
     # via requests
@@ -26,7 +26,7 @@ kiwisolver==1.4.5
     # via matplotlib
 lxml==4.9.3
     # via nilearn
-matplotlib==3.9.0
+matplotlib==3.9.2
     # via
     #   seaborn
     #   stare-pet (setup.py)
@@ -36,7 +36,7 @@ nibabel==5.2.1
     #   stare-pet (setup.py)
 nilearn==0.10.4
     # via stare-pet (setup.py)
-numpy==1.26.4
+numpy==2.1.1
     # via
     #   contourpy
     #   matplotlib
@@ -47,17 +47,17 @@ numpy==1.26.4
     #   scipy
     #   seaborn
     #   stare-pet (setup.py)
-packaging==23.2
+packaging==24.1
     # via
     #   matplotlib
     #   nibabel
     #   nilearn
-pandas==2.2.2
+pandas==2.2.3
     # via
     #   nilearn
     #   seaborn
     #   stare-pet (setup.py)
-pillow==10.1.0
+pillow==10.4.0
     # via matplotlib
 pyparsing==3.1.1
     # via matplotlib
@@ -83,7 +83,7 @@ six==1.16.0
     # via python-dateutil
 threadpoolctl==3.2.0
     # via scikit-learn
-tzdata==2024.1
+tzdata==2024.2
     # via pandas
 urllib3==2.1.0
     # via requests
