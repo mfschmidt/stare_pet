@@ -600,6 +600,54 @@ def alternate_selected(stare_output_path):
     return alternates
 
 
+def collapse_slices_3d(data, by=2, along=2):
+    """ With array data, average 'by' slices at a time over the 'along' axis.
+    """
+
+    assert data.ndim == 3
+    assert along < data.ndim, \
+        f"'along' is {along}, but data only have {data.ndim} axes."
+
+    # New array for storing collapsed data
+    new_dim = int(np.ceil(data.shape[along] / 2.0))
+    _shape = (*data.shape[:along], new_dim, *data.shape[along + 1:])
+    _data = np.zeros(_shape)
+    print(f"reshaping data from {data.shape} to {_shape}")
+
+    # Collapse data, one slice at-a-time
+    for i in range(new_dim):
+        # set range of z values to average, without going outside the array.
+        i_beg = i * by
+        i_end = i_beg + by
+        if i_end > data.shape[along]:
+            i_end = data.shape[along]
+
+        # Collapse 'by' slices of data
+        _slice = None
+        if along == 0:
+            _slice = np.mean(data[i_beg:i_end, :, :], axis=along)
+            _data[i, :, :] = _slice
+        elif along == 1:
+            _slice = np.mean(data[:, i_beg:i_end, :], axis=along)
+            _data[:, i, :] = _slice
+        elif along == 2:
+            _slice = np.mean(data[:, :, i_beg:i_end], axis=along)
+            _data[:, :, i] = _slice
+        print(f"  {i}: {'None' if _slice is None else _slice.shape}")
+
+    return _data
+
+
+def collapse_array_3d(data, by=2):
+    """ With array data, average 'by' slices at a time over all dimensions.
+    """
+
+    _data = collapse_slices_3d(data, by=by, along=2)
+    _data = collapse_slices_3d(_data, by=by, along=1)
+    _data = collapse_slices_3d(_data, by=by, along=0)
+    return _data
+
+
 def stat_str(a):
     """ Build a descriptive string about the values in the array provided.
 

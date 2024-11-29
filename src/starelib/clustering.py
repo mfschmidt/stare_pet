@@ -9,7 +9,10 @@ import pickle
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
 
-from .util import flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d
+from .util import (
+    flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d,
+    collapse_array_3d,
+)
 from .util import from_cache, to_cache
 from .centroid import Centroid
 from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
@@ -395,7 +398,8 @@ def resample_for_clustering(original_image, resample_string, logger=None):
     elif resample_string == "4mm":
         target_affine = np.diag((4.0, 4.0, 4.0, ))
     elif resample_string == "2x":
-        target_affine = original_image.affine[:3, :3] * 2.0
+        target_affine = original_image.affine.copy()
+        target_affine[:3, :3] = original_image.affine[:3, :3] * 2.0
     else:
         target_affine = None
         warning = (f"The resampling method '{resample_string}' is not "
@@ -407,10 +411,25 @@ def resample_for_clustering(original_image, resample_string, logger=None):
             print(warning)
 
     if target_affine is not None:
-        return (
-            image.resample_img(original_image, target_affine=target_affine),
-            True,
-        )
+        if resample_string == "2x":
+            # I checked with a toy dataset and discovered that nilearn's
+            # resampling doesn't do any averaging or smoothing of collapsed
+            # voxels. So to do a 2x resample, it just uses one of the 8
+            # values in the 2x2x2 array it collapses. And it does the same
+            # thing with any of the three interpolation options! With noisy
+            # data, we'll get a lot more benefit from averaging the values
+            # within the 2x2x2 block. So I wrote a function to do that.
+            # (see adhoc_test_resampling_with_fake_data.ipynb)
+            resampled_data = collapse_array_3d(original_image.get_fdata(), by=2)
+            return (
+                nib.nifti1.Nifti1Image(resampled_data, affine=target_affine, ),
+                True
+            )
+        else:
+            return (
+                image.resample_img(original_image, target_affine=target_affine),
+                True,
+            )
     else:
         return original_image, False
 
