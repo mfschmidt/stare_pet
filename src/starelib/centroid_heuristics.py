@@ -79,6 +79,39 @@ def likely_peripheral(c):
     return len(c.activity) > 0
 
 
+def spatial_info_worker(arg_tuple):
+    """ A worker function to calculate spatial information for centroids
+
+        This worker can be launched in a separate process to calculate
+        spatial information on a cluster/centroid.
+    """
+
+    (desc, c) = arg_tuple
+
+    worker_start = datetime.now()
+    print(f"    Starting spatial information worker for centroid {str(c)} "
+          f"at {worker_start.strftime('%m/%d %I:%M')}", flush=True)
+    log_messages = list()
+
+    c.update_spatial_clusters(message_list=log_messages, verbose=True)
+
+    log_messages.append(
+        f"  For {str(c)}, found {c.blob_count} blobs with "
+        f"{c.voxels_per_blob:0.2f} voxels each in "
+        f"{datetime.now() - worker_start}."
+    )
+
+    worker_end = datetime.now()
+    print(f"    Finished spatial information worker for centroid {str(c)} "
+          f"at {worker_end.strftime('%m/%d %I:%M')} "
+          f"after {worker_end - worker_start}.", flush=True)
+
+    return {
+        "c": c,
+        "log_messages": log_messages,
+    }
+
+
 def k_means_worker(arg_tuple):
     """ A worker function to calculate k-means for one k
 
@@ -90,7 +123,7 @@ def k_means_worker(arg_tuple):
     # Workers get a single argument, so the caller must pack arguments
     # into a tuple and the worker (this function) must unpack them.
     # This order must match exactly the order where they're packed.
-    (k, data, random_seed, verbose) = arg_tuple
+    (desc, k, data, random_seed, verbose) = arg_tuple
 
     worker_start = datetime.now()
     print(f"    Starting k-means worker for k={k} "
@@ -162,7 +195,7 @@ def find_centroids(
     pre_k_timestamp = datetime.now()
     list_of_args = []
     for k in ks:
-        list_of_args.append((k, data, random_seed, verbose))
+        list_of_args.append((f"k {k}", k, data, random_seed, verbose))
     # Run each tuple of arguments in a separate process to save time.
 
     k_means_results = run_in_mp_queue(
