@@ -668,3 +668,33 @@ def stat_str(a):
         f"95% [{lo_95:0.1f} to {hi_95:0.1f}] "
         f"range [{_lo:0.1f} to {_hi:0.1f}]"
     )
+
+
+def get_s_i_axis(img_shape, img_affine):
+    """ For an image with the given shape and affine, which axis is inf-sup?
+
+        If the third of three axes is the inferior-superior axis, or S+,
+        get_s_i_axis will return (2, 1). If it's superior-inferior, or S-,
+        it will return (2, -1). Other orderings are also available.
+    """
+
+    # Calculate the world extents
+    x0, y0, z0 = coord_transform(0, 0, 0, img_affine)
+    x1, y1, z1 = coord_transform(
+        img_shape[0], img_shape[1], img_shape[2], img_affine
+    )
+    min_z, max_z = min(z0, z1), max(z0, z1)
+
+    img_center_ijk = np.array([
+        int(img_shape[0] / 2),
+        int(img_shape[1] / 2),
+        int(img_shape[2] / 2)
+    ])
+    for ax in (2, 1, 0):
+        ijk = img_center_ijk.copy()
+        ijk[ax] = 0
+        world_coords = coord_transform(ijk[0], ijk[1], ijk[2], img_affine)
+        if world_coords[ax] == min_z:
+            return ax, 1
+        elif world_coords[ax] == max_z:
+            return ax, -1
