@@ -14,12 +14,14 @@ RUN apt-get update && \
     python3 -m venv /venv
 
 # Install ITK as a dependency of PVC
+# ITK <5.4.0 will not compile with gcc>13, which is default with ubuntu:noble
 RUN cd /opt/ && \
     wget https://github.com/InsightSoftwareConsortium/ITK/releases/download/v5.2.1/InsightToolkit-5.2.1.tar.gz && \
     tar -xzf InsightToolkit-5.2.1.tar.gz && \
-    mkdir /opt/build_itk && cd /opt/build_itk && \
+    mkdir -p /opt/build_itk && cd /opt/build_itk && \
     cmake ../InsightToolkit-5.2.1 -DITK_BUILD_DEFAULT_MODULES:BOOL=ON -DModule_ITKReview:BOOL=ON && \
-    make && make install
+    make && make install && \
+    rm /opt/InsightToolkit-5.2.1.tar.gz
 
 # Install PVC
 RUN cd /opt/ && \
