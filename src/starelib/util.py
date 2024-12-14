@@ -471,7 +471,8 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
 
 
 def dice_coef(y_true, y_pred):
-    """ Calculate one scalar Dice's coefficient for two vectors. """
+    """ Calculate one scalar Dice's coefficient for two binary vectors. """
+
     intersection = np.sum(y_true * y_pred)
     denominator = np.sum(y_true) + np.sum(y_pred)
     if denominator == 0.0:
