@@ -65,12 +65,14 @@ class TimeActivityCurve:
             "auc": self.auc(),
         }
         for f in self.features:
-            if isinstance(self.features[f], tuple) or isinstance(f, list):
+            if (isinstance(self.features[f], tuple) or isinstance(f, list)):
                 for i, thing in enumerate(self.features[f]):
                     d[f"feature_{f}_{i + 1}"] = thing
             elif isinstance(self.features[f], dict):
                 for k, v in self.features[f].items():
                     d[f"feature_{f}_{k}"] = v
+            elif isinstance(self.features[f], np.ndarray):
+                pass  # skip arrays, they don't need to get saved to dataframes
             else:
                 d[f"feature_{f}"] = self.features[f]
         return d
@@ -218,6 +220,7 @@ class TimeActivityCurve:
                 "Impossibly, the predetermined times are non-uniform!"
             )
 
+        # This is NOT fit, just expanded on the time axis, with a bunch of NaNs
         return TimeActivityCurve(
             activity=np.array(boot_curve_activity_uniform),
             timepoints=np.array(complete_time_uniform),
