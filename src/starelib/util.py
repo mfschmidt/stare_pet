@@ -89,7 +89,7 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
         :param numpy.array labels: The array of integer labels
         :param tuple new_shape: The new shape for the volume
         :param bool zxy: Unflatten in z, x, y order
-        :returns np.array: The 4d image
+        :returns ArrayLike: The 4d image
     """
 
     # This un-flattening matches the flattening above to
