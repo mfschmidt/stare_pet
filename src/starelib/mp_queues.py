@@ -11,8 +11,9 @@ def queue_consumer(task_q, rslt_q, pid, fxn, logger):
             break
         else:
             # Save results to the result queue,
+            # All lists of args need to start with a str description
             logger.debug(f"  process {pid} sending worker tuple "
-                         f"for region {msg[0]}...")
+                         f"for {msg[0]}...")
             rslt_q.put(fxn(msg))
 
     logger.debug(f"  process {pid} found an empty queue and is exiting.")
@@ -34,14 +35,15 @@ def run_in_mp_queue(fxn, list_of_args, num_cpus, logger):
     for argument_tuple in list_of_args:
         task_queue.put(argument_tuple)
     logger.debug(f"  queue has {task_queue.qsize()} jobs")
-    for _ in range(num_cpus):
+    actual_cpus = min(num_cpus, os.cpu_count())
+    for _ in range(actual_cpus):
         task_queue.put(None)  # to kill each worker when real jobs are complete
     logger.debug(f"  queue has {task_queue.qsize()} (jobs + Nones)")
 
     # Create processes to handle the jobs
     processes = []
     rslt_queue = mp.Queue()
-    for proc_id in range(num_cpus):
+    for proc_id in range(actual_cpus):
         proc = mp.Process(
             # name="some unique name not 'Process-1'",
             target=queue_consumer,
