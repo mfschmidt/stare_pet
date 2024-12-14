@@ -438,6 +438,13 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
 
     # All in-mask voxels have been added,
     # now organize them into a DataFrame for easy analyses
+    _labels, _counts = np.unique(array_3d, return_counts=True)
+    count_message = "; ".join([f"#{int(_labels[i])} has {_counts[i]:,}" for i in range(len(_labels))])
+    messages.append(f"Found {len(_blobs.keys())} blobs for label {label}: [{count_message}]")
+    if len(_blobs.keys()) < 1:
+        messages.append(print(f"nothing to store ({label}); bailing out"))
+        return None, list(), list()
+
     blob_data = pd.DataFrame(
         [
             {
