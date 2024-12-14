@@ -14,37 +14,33 @@ class Centroid(TimeActivityCurve):
             timepoints,
             label,  # should be non-zero as zero indicates background
             k,
-            source="",
-            missing_timepoints=None,
-            sd=None,
-            labels=None,
-            original_shape=None,
-            voxel_count=0,
-            blob_count=0,
-            voxels_per_blob=0.0,
-            voxels_in_biggest_blobs=0.0,
-            name=None,
-            best_in_k=False,
-            best_overall=False,
+            **kwargs,
     ):
         """ Centroid constructor """
 
         # Specified properties
         super().__init__(
-            activity, timepoints, source, missing_timepoints=missing_timepoints,
-            sd=sd, name=name
+            activity,
+            timepoints,
+            kwargs.get("source", ""),
+            missing_timepoints=kwargs.get("missing_timepoints", None),
+            sd=kwargs.get("sd", None),
+            name=kwargs.get("name", None)
         )
         self.label = label  # int, one of k clusters
         self.k = k  # int, how many clusters
-        self.labels = labels  # ndarray shaped like (1000000,)
-        self.original_shape = original_shape
-        self.best_in_k = best_in_k
-        self.best_overall = best_overall
-        self.source = source
-        self.voxel_count = voxel_count
-        self.blob_count = blob_count
-        self.voxels_per_blob = voxels_per_blob
-        self.voxels_in_biggest_blobs = voxels_in_biggest_blobs
+        self.labels = kwargs.get("labels", None)  # ndarray shaped like (1000000,)
+        self.original_shape = kwargs.get("original_shape", None)
+        self.original_affine = kwargs.get("original_affine", None)
+        self.voxels_in_img = kwargs.get("voxels_in_img", 0)
+        self.best_in_k = kwargs.get("best_in_k", False)
+        self.best_overall = kwargs.get("best_overall", False)
+        self.source = kwargs.get("source", None)
+        self.voxel_count = kwargs.get("voxel_count", 0)
+        self.blob_count = kwargs.get("blob_count", 0)
+        self.voxels_per_blob = kwargs.get("voxels_per_blob", 0.0)
+        self.voxels_in_biggest_blobs = kwargs.get("voxels_in_biggest_blobs", 0)
+        self.blob_data = kwargs.get("blob_data", None)
 
     def __str__(self):
         return "Centroid {} of k={}{}{}".format(
@@ -60,16 +56,16 @@ class Centroid(TimeActivityCurve):
         d["best_in_k"] = self.best_in_k
         d["best_overall"] = self.best_overall
         d["voxel_count"] = self.voxel_count
+        d["voxels_in_img"] = self.voxels_in_img
         d["blob_count"] = self.blob_count
         d["voxels_per_blob"] = self.voxels_per_blob
         d["voxels_in_biggest_blobs"] = self.voxels_in_biggest_blobs
-        d["source"] = self.source
         return d
 
     def labels_in_3d(self):
         if any([self.labels is None, self.original_shape is None, ]):
             return None
-        return reshape_labels_to_3d(self.labels, self.original_shape[:3])
+        return reshape_labels_to_3d(self.labels, self.original_shape)
 
     def mask_in_3d(self):
         if any([self.labels is None, self.original_shape is None, ]):
