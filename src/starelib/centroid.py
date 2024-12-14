@@ -67,32 +67,76 @@ class Centroid(TimeActivityCurve):
             return None
         return reshape_labels_to_3d(self.labels, self.original_shape)
 
-    def mask_in_3d(self):
+    def mask_in_3d(self, sparsity_threshold=100, logger=None):
         if any([self.labels is None, self.original_shape is None, ]):
             return None
-        return reshape_labels_to_3d(
-            np.array(self.labels == self.label).astype(np.uint8),
-            self.original_shape[:3]
-        )
+        if sparsity_threshold == 100:
+            return reshape_labels_to_3d(
+                np.array(self.labels == self.label).astype(np.uint8),
+                self.original_shape
+            )
+        else:
+            self.update_spatial_clusters()
+            real_threshold = sparsity_threshold / 100.0
+            counts = (self.blob_data.groupby("blob")['blob']
+                      .agg('count').sort_values(ascending=False))
+            blobs_consumed, voxels_consumed = 0, 0
+            ratio = 0.0
+            keepers = set()
+            for idx, voxels in counts.items():
+                ratio = voxels_consumed / self.voxel_count
+                if ratio <= real_threshold:
+                    keepers.add(idx)
+                else:
+                    break
+                blobs_consumed += 1
+                voxels_consumed += voxels
+
+            if logger is not None:
+                plural = "s" if blobs_consumed > 1 else ""
+                logger.debug(f"Denoised cluster mask from {self.voxel_count:,}"
+                             f" voxels in {self.blob_count} blobs, to "
+                             f"{blobs_consumed} blob{plural} with "
+                             f"{voxels_consumed:,} voxels ("
+                             f"{ratio:0.1%}.")
+
+            keeper_filter = self.blob_data['blob'].isin(keepers)
+            df_in = self.blob_data.loc[keeper_filter, :]
+            new_mask = np.zeros(self.original_shape[:3], dtype=np.uint8)
+
+            # df_out = self.blob_data.loc[~keeper_filter, :]
+            for idx, row in df_in.iterrows():
+                new_mask[row['x'], row['y'], row['z']] = 1
+            return new_mask
 
     def update_spatial_clusters(
-            self, labels=None, force_update=False, verbose=0, logger=None
+            self, labels=None, force_update=False,
+            message_list=None, verbose=0, logger=None
     ):
         if labels is None:
             labels = self.labels
-        message_list = []
+        if message_list is None:
+            message_list = list()
         if self.blob_count == 0 or force_update:
+            self.voxel_count = np.sum(self.labels == self.label)
             blob_df, blob_ids, voxel_counts = get_cluster_blobs(
-                reshape_labels_to_3d(labels, self.original_shape[:3]),
+                reshape_labels_to_3d(labels, self.original_shape),
                 label=self.label, verbose=verbose, messages=message_list,
             )
+            self.blob_data = blob_df
             self.blob_count = len(blob_ids)
-            self.voxels_per_blob = np.mean(voxel_counts)
-            _voxel_counts = sorted(voxel_counts, reverse=True)
-            if len(voxel_counts) >= 4:
-                self.voxels_in_biggest_blobs = np.sum(_voxel_counts[:4])
+            if self.blob_count > 0:
+                self.voxels_per_blob = np.mean(voxel_counts)
+                num_to_sum = np.min((self.blob_count, 4))
+                self.voxels_in_biggest_blobs = np.sum(
+                    sorted(voxel_counts, reverse=True)[:num_to_sum]
+                )
             else:
-                self.voxels_in_biggest_blobs = np.sum(_voxel_counts)
+                self.voxels_per_blob = 0.0
+                self.voxels_in_biggest_blobs = 0
+        else:
+            message_list.append(f"Centroid {self.label}/{self.k} did not update "
+                                f"because it already has {self.blob_count} blobs.")
         if logger is not None:
             for message in message_list:
                 logger.debug(message)
