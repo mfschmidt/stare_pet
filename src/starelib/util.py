@@ -11,7 +11,7 @@ import pickle
 import re
 from nibabel import Nifti1Image
 from sklearn.metrics.pairwise import cosine_similarity
-
+from nilearn.image import coord_transform
 
 class StareVolume:
     """ Wrap a Nifti1Image with additional metadata needed for STARE """
