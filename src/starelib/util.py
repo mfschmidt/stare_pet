@@ -609,7 +609,7 @@ def collapse_slices_3d(data, by=2, along=2):
     """ With array data, average 'by' slices at a time over the 'along' axis.
     """
 
-    assert data.ndim == 3
+    assert data.ndim >= along
     assert along < data.ndim, \
         f"'along' is {along}, but data only have {data.ndim} axes."
 
@@ -617,7 +617,7 @@ def collapse_slices_3d(data, by=2, along=2):
     new_dim = int(np.ceil(data.shape[along] / 2.0))
     _shape = (*data.shape[:along], new_dim, *data.shape[along + 1:])
     _data = np.zeros(_shape)
-    print(f"reshaping data from {data.shape} to {_shape}")
+    # print(f"reshaping data from {data.shape} to {_shape}")
 
     # Collapse data, one slice at-a-time
     for i in range(new_dim):
