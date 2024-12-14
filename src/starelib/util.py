@@ -95,6 +95,10 @@ def reshape_labels_to_3d(labels, new_shape, zxy=True):
     # This un-flattening matches the flattening above to
     # reverse what was done before. If one function is
     # changed, the other should be changed to match.
+    if len(new_shape) > 3:
+        new_shape = (new_shape[0], new_shape[1], new_shape[2])
+    if len(new_shape) < 3:
+        raise ValueError("New shape must be at least 3 dimensional")
     if zxy:
         img4d = np.zeros(new_shape)
         i = 0
