@@ -39,7 +39,7 @@ class Centroid(TimeActivityCurve):
         self.voxel_count = kwargs.get("voxel_count", 0)
         self.blob_count = kwargs.get("blob_count", 0)
         self.voxels_per_blob = kwargs.get("voxels_per_blob", 0.0)
-        self.voxels_in_biggest_blobs = kwargs.get("voxels_in_biggest_blobs", 0)
+        self.sparsity = kwargs.get("sparsity", 0)
         self.blob_data = kwargs.get("blob_data", None)
 
     def __str__(self):
@@ -59,7 +59,7 @@ class Centroid(TimeActivityCurve):
         d["voxels_in_img"] = self.voxels_in_img
         d["blob_count"] = self.blob_count
         d["voxels_per_blob"] = self.voxels_per_blob
-        d["voxels_in_biggest_blobs"] = self.voxels_in_biggest_blobs
+        d["sparsity"] = self.sparsity
         return d
 
     def labels_in_3d(self):
@@ -128,13 +128,22 @@ class Centroid(TimeActivityCurve):
             self.blob_count = len(blob_ids)
             if self.blob_count > 0:
                 self.voxels_per_blob = np.mean(voxel_counts)
-                num_to_sum = np.min((self.blob_count, 4))
-                self.voxels_in_biggest_blobs = np.sum(
-                    sorted(voxel_counts, reverse=True)[:num_to_sum]
-                )
+
+                # Sparsity is the smallest number of blobs to hold 95% of the voxels.
+                sparsity_threshold = 0.95
+                counts = (self.blob_data.groupby("blob")['blob']
+                          .agg('count').sort_values(ascending=False))
+                blobs_consumed, voxels_consumed = 0, 0
+                for idx, voxels in counts.items():
+                    ratio = voxels_consumed / self.voxel_count
+                    if ratio > sparsity_threshold:
+                        break
+                    blobs_consumed += 1
+                    voxels_consumed += voxels
+                self.sparsity = blobs_consumed
             else:
                 self.voxels_per_blob = 0.0
-                self.voxels_in_biggest_blobs = 0
+                self.sparsity = 0
         else:
             message_list.append(f"Centroid {self.label}/{self.k} did not update "
                                 f"because it already has {self.blob_count} blobs.")
