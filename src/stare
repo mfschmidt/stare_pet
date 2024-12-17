@@ -46,6 +46,8 @@ def main(parsed_args):
         if results.args.stop_after_clustering:
             return 0
         results = correct_partial_volumes(results)
+        if results.args.stop_after_pvc:
+            return 0
         results = fit_vascular_mean_tac(results)
         results = tac_vascular_correction(results)
         results = boot_anchor(results)

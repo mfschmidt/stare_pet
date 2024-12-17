@@ -118,6 +118,10 @@ def get_argument_parser():
         help="Exit after clustering is complete"
     )
     parser.add_argument(
+        "--stop-after-pvc", action="store_true",
+        help="Exit after partial volume correction is complete"
+    )
+    parser.add_argument(
         "--output-all-fit-failures", action="store_true",
         help="Turn on to emit a note on each curve fit failure to the log"
     )
