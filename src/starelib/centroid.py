@@ -67,17 +67,17 @@ class Centroid(TimeActivityCurve):
             return None
         return reshape_labels_to_3d(self.labels, self.original_shape)
 
-    def mask_in_3d(self, sparsity_threshold=100, logger=None):
+    def mask_in_3d(self, sparsity_threshold=0, logger=None):
         if any([self.labels is None, self.original_shape is None, ]):
             return None
-        if sparsity_threshold == 100:
+        if sparsity_threshold == 0:
             return reshape_labels_to_3d(
                 np.array(self.labels == self.label).astype(np.uint8),
                 self.original_shape
             )
         else:
             self.update_spatial_clusters()
-            real_threshold = sparsity_threshold / 100.0
+            real_threshold = 1.0 - (sparsity_threshold / 100.0)
             counts = (self.blob_data.groupby("blob")['blob']
                       .agg('count').sort_values(ascending=False))
             blobs_consumed, voxels_consumed = 0, 0
@@ -92,6 +92,7 @@ class Centroid(TimeActivityCurve):
                 blobs_consumed += 1
                 voxels_consumed += voxels
 
+            self.features['reduced_ratio'] = 1.0 - ratio
             if logger is not None:
                 plural = "s" if blobs_consumed > 1 else ""
                 logger.debug(f"Denoised cluster mask from {self.voxel_count:,}"
