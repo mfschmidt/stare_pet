@@ -121,8 +121,10 @@ def get_argument_parser():
              "be written to a csv file in the 'debug/' directory."
     )
     parser.add_argument(
-        "--no-cluster-override", action="store_true",
-        help="Turn on to ensure the first cluster selected is used"
+        "--ignore-spatial-info", action="store_true",
+        help="Turn on to ensure the cluster selected by k-means, "
+             "based only on temporal information, is used "
+             "without considering spatial information to override it."
     )
     parser.add_argument(
         "--stop-after-clustering", action="store_true",
