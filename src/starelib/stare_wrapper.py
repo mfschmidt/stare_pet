@@ -57,6 +57,10 @@ def get_argument_parser():
         help="A binary mask may be used in place of k-means clustering.",
     )
     parser.add_argument(
+        "--override-step-2-cluster", type=Path, default=None,
+        help="A binary mask may be used in place of k-means clustering.",
+    )
+    parser.add_argument(
         "-c", "--vasc-corr-pct", type=int, default=0,
         help="The vascular correction percentage, as an integer from 0 to 100",
     )
