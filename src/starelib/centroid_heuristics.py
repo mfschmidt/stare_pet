@@ -60,7 +60,27 @@ def likely_vascular(c):
 
     # If this centroid is reversible signal,
     # it is probably vascular
-    return not likely_noise(c) and not likely_irreversible(c)
+    return (
+        not likely_noise(c) and
+        not likely_irreversible(c) and
+        not likely_background(c)
+    )
+
+
+def likely_background(c):
+    """Return true if centroid appears to be background.
+
+    :param Centroid c: The centroid to assess
+    :return: True if background, False otherwise
+    """
+
+    # If this centroid is larger than 1/5 of the image,
+    # it is much more likely to be non-brain background than vascular.
+    if isinstance(c, Centroid):
+        print(f"C {c.label}/{c.k} has {c.voxel_count:,}/{c.voxels_in_img:,} voxels.")
+        return c.voxel_count > c.voxels_in_img / 5.0
+    else:
+        return False
 
 
 def likely_peripheral(c):
@@ -344,6 +364,7 @@ def find_vascular_centroids(
         "likely_irreversible": likely_irreversible,
         "likely_irreversible_linear": likely_irreversible_linear,
         "likely_vascular": likely_vascular,
+        "likely_background": likely_background,
     }
     all_centroids, k_means_fits = find_centroids(
         data,
