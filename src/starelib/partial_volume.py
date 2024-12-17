@@ -165,14 +165,29 @@ def correct_partial_volumes(results):
         results.best_centroid(step=2).name: "red",
         results.pvc_mean_vascular_tac.name: "orange",
     }
+    tac_plot_dashes = {
+        results.best_centroid(step=1).name: (999,),
+        results.best_centroid(step=2).name: (999,),
+        results.pvc_mean_vascular_tac.name: (999,),
+    }
+    # If a TAC was reduced, add the original TAC, too, and make it dashed.
+    if "reduced" in results.best_centroid(step=1).name:
+        tac_plot_dashes[results.best_centroid(step=1).name] = (4, 1)
+        for centroid in results.cluster_centroids[1]:
+            if 'former_champion' in centroid.features.keys():
+                tac_plot_data.append(centroid)
+                tac_plot_palette[centroid.name] = "cornflowerblue"
+                tac_plot_dashes[centroid.name] = (1, 3)
     if results.plasma_tac is not None:
-        tac_plot_data.append(results.plasma_tac)
         tac_plot_palette[results.plasma_tac.name] = "green"
+        tac_plot_dashes[results.plasma_tac.name] = (999,)
+        tac_plot_data.append(results.plasma_tac)
 
     fig_top_tacs = plot_detailed_tacs(
         data=tac_plot_data,
         title=f"Subject {results.args.subject} Vascular TACs",
         palette=tac_plot_palette,
+        dashes=tac_plot_dashes,
     )
     fig_top_tacs.savefig(results.args.fig_path /
                          f"sub-{results.args.subject}_step-2_four_tacs.png")
