@@ -99,6 +99,157 @@ def likely_peripheral(c):
     return len(c.activity) > 0
 
 
+def calculate_k_stability(centroids, similarity_matrix):
+    """ Is a variant of the 'best' centroid found at multiple k's?
+    """
+
+    unique_k_values = sorted(set([c.k for c in centroids]))
+
+    # Let each centroid pick out its relevant coefficients and summarize them.
+    for c1 in centroids:
+        c1_idx = f"{c1.label:02d}-{c1.k:02d}"
+        c1.features['stability'] = 'Not implemented'
+        c1.features['overlapping'] = list()
+        c1.features['matches_best'] = 0.0
+        best_matches = list()
+        top_dices = list()
+        all_dices = dict()
+        for k in unique_k_values:
+            if c1.k != k:
+                all_dices[k] = list()
+        for c2 in centroids:
+            c2_idx = f"{c2.label:02d}-{c2.k:02d}"
+            dc = similarity_matrix.loc[c1_idx, c2_idx]
+            if c1.k != c2.k:
+                all_dices[c2.k].append(dc)
+                if dc > 0.50:
+                    c1.features['overlapping'].append(c2_idx)
+            if c2.best_in_k:
+                best_matches.append(dc)
+        for k, dices in all_dices.items():
+            if len(dices) > 0:
+                top_dices.append(max(dices))
+            else:
+                top_dices.append(0.0)
+        if len(top_dices) > 0:
+            c1.features['stability'] = np.mean(top_dices)
+        else:
+            c1.features['stability'] = 0.0
+        if len(best_matches) > 0:
+            c1.features['matches_best'] = np.mean(best_matches)
+        else:
+            c1.features['matches_best'] = 0.0
+
+
+def calculate_sparsity(centroids, threshold=95):
+    """ With each centroid, calculate sparsity of blob distribution.
+
+    :param centroids: List of centroids
+    :param threshold: Sparsity threshold, and integer between 0 and 100
+    :returns: nothing; centroids are updated internally
+    """
+
+    real_threshold = threshold / 100.0
+    for c in centroids:
+        counts = c.blob_data.groupby("blob")['blob'].agg('count').sort_values(
+            ascending=False
+        )
+        blobs_consumed, voxels_consumed = 0, 0
+        for idx, voxels in counts.items():
+            blobs_consumed += 1
+            voxels_consumed += voxels
+            ratio = voxels_consumed / c.voxel_count
+            if ratio > real_threshold:
+                c.features[f"{threshold}_in_blobs"] = blobs_consumed
+                c.features[f"{threshold}_in_voxels"] = voxels_consumed
+                c.features[f"{threshold}_out_blobs"] = c.blob_count - blobs_consumed
+                c.features[f"{threshold}_out_voxels"] = c.voxel_count - voxels_consumed
+                print(f"First {blobs_consumed} used {voxels_consumed} voxels "
+                      f"({ratio:0.1%}) - {c.voxel_count - voxels_consumed} voxels "
+                      f"remain in {c.blob_count - blobs_consumed} blobs.")
+                break
+
+
+def calculate_axis_weights(centroids):
+    """ How heavily weighted are the cluster masks along x, y, z axes?
+    """
+
+    # Collapse axes of each centroid to determine how heavily a single
+    # slice is represented by this cluster mask in each dimension
+    for c in centroids:
+        img_shape = c.original_shape
+        img_affine = c.original_affine
+        ax, direction = get_s_i_axis(img_shape, img_affine)
+
+        # Figure out which slice is the lowest axial neck slice.
+        mask = (reshape_labels_to_3d(c.labels, c.original_shape) == c.label)
+        if ax == 2:
+            # feature_name = 'k_density'
+            density = np.sum(np.sum(mask, axis=0), axis=0)
+        elif ax == 1:
+            # feature_name = 'j_density'
+            density = np.sum(np.sum(mask, axis=0), axis=1)
+        else:  # ax == 0
+            # feature_name = 'i_density'
+            density = np.sum(np.sum(mask, axis=1), axis=1)
+
+        if direction > 0.0:
+            start, stop = 0.0, len(density)
+        else:
+            start, stop = len(density), 0.0
+
+        """
+        # labels already had +1, so they're 1-indexed
+        # We don't have the affine and are ignorant of real-world directions,
+        # so avoid world x,y,z and use array i,j,k
+        # Collapse i, leaving [j,k]
+        jk_sums_2d = np.sum(mask, axis=0)
+        # Collapse j, leaving only [k]
+        c.features['k_density'] = np.sum(jk_sums_2d, axis=0)
+        # Collapse k, leaving only [j]
+        c.features['j_density'] = np.sum(jk_sums_2d, axis=1)
+        # Collapse j, leaving [i, k]
+        ik_sums_2d = np.sum(mask, axis=1)
+        # Collapse k, leaving only [i]
+        c.features['i_density'] = np.sum(ik_sums_2d, axis=1)
+        """
+
+        # Calculate a score to indicate the cluster is dominated by neck noise.
+        def custom_inverse_sigmoid(x):
+            return 1.0 - (1 / (1 + 3 ** (-1 * (x - 12)))) ** (1 / 2)
+        weights = custom_inverse_sigmoid(np.linspace(start, stop, len(density)))
+        ratios = density / np.sum(density)
+        # ratios = ratios - np.mean(ratios) * np.std(ratios)
+        c.features['neck_noise_score'] = np.sum(ratios * weights)
+
+
+def calculate_spatial_info(centroids, step, logger, num_cpus=-1):
+    """ Calculate centroid stats.
+    """
+
+    logger.debug(
+        f"Analyzing spatial clusters for step {step}"
+    )
+    centroid_tuples = [
+        (str(c), c) for c in centroids
+    ]
+    # Do spatial info calculations in as many threads as we can.
+    list_of_results = run_in_mp_queue(
+        spatial_info_worker,
+        centroid_tuples,
+        num_cpus=num_cpus,
+        logger=logger,
+    )
+    # Multi-processing works on copies of the original data, so return
+    # updated data, losing our original centroids
+    returned_centroids = list()
+    for rslt in list_of_results:
+        returned_centroids.append(rslt['c'])
+        for msg in rslt['log_messages']:
+            logger.info(msg)
+    return returned_centroids
+
+
 def spatial_info_worker(arg_tuple):
     """ A worker function to calculate spatial information for centroids
 
