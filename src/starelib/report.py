@@ -185,8 +185,15 @@ class Report:
     def _get_styles():
         return "\n".join([
             "<style>",
-            "table {padding: 4px; }",
-            "td {padding: 4px; }",
+            "table {border-color: gray; border-spacing: 0; border: 1px solid; }",
+            "thead,tfoot { background-color: gainsboro; }",
+            "thead th {"
+            "  font-weight: bold; "
+            "}",
+            "tfoot th {"
+            "  font-weight: lighter; font-style: italic; text-align: right; "
+            "}",
+            "th,td {padding: 4px; }",
             "h2 {clear: both; }",
             "figure {",
             "  clear: both;",
