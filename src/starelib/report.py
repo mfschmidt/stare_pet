@@ -40,12 +40,29 @@ class Section:
             return self._end_datetime - self._start_datetime
 
     def add_line(self, line, css_class=None, log=True):
+        if log:
+            loggable_lines = (line.replace("<br />", "\n")
+                              .replace("<table>", "")
+                              .replace("</table>", "")
+                              .replace("<thead>", "")
+                              .replace("</thead>", "")
+                              .replace("<tbody>", "")
+                              .replace("</tbody>", "")
+                              .replace("<tfoot>", "")
+                              .replace("</tfoot>", "")
+                              .replace("<th>", " ")
+                              .replace("</th>", ",")
+                              .replace("<tr>", "")
+                              .replace("</tr>", "\n")
+                              .replace("<td>", " ")
+                              .replace("</td>", ",")).split("\n")
+            for loggable_line in loggable_lines:
+                if len(loggable_line.strip()) > 0:
+                    self._report.logger.info(loggable_line.strip())
         if css_class is None:
             self.items.append(f"<p>{line}</p>")
         else:
             self.items.append(f"<p class='{css_class}'>{line}</p>")
-        if log:
-            self._report.logger.info(line)
 
     def add_link(self, url, text=None, css_class=None):
         css_class_str = ""
