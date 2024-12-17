@@ -356,8 +356,9 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
         grays = ['gray', ] * len(data[t_filter]['name'].unique())
         sns.lineplot(data=data[t_filter],
                      x="t", y="activity", hue='name',
-                     palette=grays, alpha=0.5, linewidth=1, legend=False,
-                     estimator=None, ax=ax)
+                     style='name' if dashes is not None else None,
+                     dashes=dashes, palette=grays, alpha=0.5, linewidth=1,
+                     legend=False, estimator=None, ax=ax)
 
         # Plot circles on the next layer to demonstrate centroid data
         # underlying the model fits
@@ -400,7 +401,30 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
     ax_late.yaxis.set_label_position("right")
     ax_late.get_yaxis().tick_right()
 
-    ax_full.legend(bbox_to_anchor=(0.50, -0.25),
+    # Ensure the TACs are labeled in a reasonable order.
+    def label_seq_value(label):
+        value = 0
+        if "step 1" in label:
+            value = 20
+        elif "step 2" in label:
+            value = 10
+        if "pvc" in label:
+            value = 0
+        if "reduced" in label:
+            value = value - 1
+        return value
+
+    handles, labels = ax_full.get_legend_handles_labels()
+    re_mapper = list()
+    for i, lbl in enumerate(labels):
+        re_mapper.append((i, label_seq_value(lbl), lbl, handles[i]))
+    new_handles, new_labels = list(), list()
+    for new_idx, (old_idx, rank, label, handle) in enumerate(
+            sorted(re_mapper, key=lambda x: x[1])
+    ):
+        new_handles.append(handle)
+        new_labels.append(label)
+    ax_full.legend(new_handles, new_labels, bbox_to_anchor=(0.50, -0.25),
                    loc="upper center", borderaxespad=0)
 
     ax_full.set_title("Full scan")
@@ -929,7 +953,7 @@ def plot_stare_tac_fits(
     sns.scatterplot(
         x="minutes", y="microCi", hue="region", data=target_data,
         palette=tac_palette,  # sns.color_palette("muted"),
-        marker="$\circ$", ec='face', s=50,
+        marker=r"$\circ$", ec='face', s=50,
         ax=axes[0]
     )
     axes[0].legend(bbox_to_anchor=(1.04, 0.5),
@@ -940,7 +964,7 @@ def plot_stare_tac_fits(
     sns.scatterplot(
         x="minutes", y="microCi", hue="region", data=target_data,
         palette=tac_palette,  # sns.color_palette("muted"),
-        marker="$\circ$", ec='face', s=50,
+        marker=r"$\circ$", ec='face', s=50,
         ax=axes[1]
     )
     sns.lineplot(
@@ -1019,7 +1043,7 @@ def plot_all_stare_tac_fits(
         sns.scatterplot(
             x="minutes", y="microCi", hue="region", data=target_data,
             palette=tac_palette,  # sns.color_palette("muted"),
-            marker="$\circ$", ec='face', s=60,
+            marker=r"$\circ$", ec='face', s=60,
             ax=panel
         )
         sns.scatterplot(
