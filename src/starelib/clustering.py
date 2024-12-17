@@ -1,7 +1,9 @@
-from pathlib import Path
+import stat
+from pathlib import Path, PurePath
 import numpy as np
 import pandas as pd
 import logging
+import copy
 import nibabel as nib
 from nilearn import image
 from datetime import datetime
@@ -19,7 +21,8 @@ from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
 from .plotting import plot_top_centroids_atlas
 from .centroid_heuristics import (
     find_vascular_centroids, likely_irreversible_linear,
-    consider_alternate_clusters
+    consider_alternate_clusters, calculate_spatial_info,
+    calculate_k_stability, calculate_axis_weights, build_similarity
 )
 from .components import decompose_components
 
@@ -40,11 +43,11 @@ def make_atlas_and_mask(
     :param array labels: Array of labels, some matching the centroid label
     :param Nifti1Image template_img: Image to use as a template for mask data
     :param Path out_path: If provided, directory for writing out atlas and mask
-                          By default, these are not written to disk
+                          Without it, these are not written to disk
     :param str file_desc: If provided, filename is overridden
-    :param logging.logger logger: If provided, write output to this logger
-    :param resample_to: If supplied, resample 3D matrix to this image's space
-    :param pad_to: If supplied, pad 3D matrix to this image's space
+    :param logging.logger logger: If provided, write info to this logger
+    :param resample_to: If provided, resample 3D matrix to this image's space
+    :param pad_to: If provided, pad 3D matrix to this image's space
     :return: paths to atlas image and mask image
     """
 
@@ -85,13 +88,15 @@ def make_atlas_and_mask(
         )
 
     # Build an atlas and a mask, based on these labels.
+    # noinspection PyTypeChecker
     cluster_atlas_img = nib.Nifti1Image(
-        cluster_atlas_data.astype(int),
+        np.array(cluster_atlas_data, dtype=int),
         affine=target_img.affine, header=target_img.header
     )
     cluster_atlas_img.update_header()
+    # noinspection PyTypeChecker
     cluster_mask_img = nib.Nifti1Image(
-        np.array(cluster_atlas_data == centroid.label).astype(int),
+        np.array(cluster_atlas_data == centroid.label, dtype=int),
         affine=target_img.affine, header=target_img.header
     )
     cluster_mask_img.update_header()
@@ -224,15 +229,186 @@ def tabulate_centroids(centroids, added_columns=None):
     return df.sort_values(by=['k', 'label', ])
 
 
+def post_process_clusters(
+        centroids,
+        k_means_model_fits,
+        pet_4d_img,
+        results,
+        step,
+        rpt_sect,
+        logger=None
+):
+    """ After k-means, handle any additional processing before use.
+    """
+
+    # If we were asked not to post-process, just pass data right back.
+    if results.args.ignore_spatial_info:
+        rpt_sect.add_line("Centroids were not post-processed.")
+        return centroids  # untouched
+
+    # If we were asked explicitly to use an alternative cluster, do so.
+    def _override(k_step, new_mask_path):
+        """ Override the k-means auto-selection with a new cluster.
+
+            It's debatable whether this should prevent clustering from running.
+            It currently depends on copying things from the calculated centroid
+            so it must run after k-means.
+
+            :param k_step: step number to use
+            :param new_mask_path: new mask path
+            :returns: centroid, data, path to a Nifti image of the mask
+        """
+
+        results.best_vascular_mask_path[k_step] = new_mask_path
+        rpt_sect.add_line(f"Step {k_step} cluster overridden by external mask"
+                          f", '{str(new_mask_path)}'.")
+        _manual_centroid, _manual_data = fake_centroid_from_mask(
+            new_mask_path, best_of(centroids), pet_4d_img,
+        )
+        _manual_centroid.name = f"Overridden best step {k_step} centroid"
+        # _best_cluster_as_image = nib.nifti1.Nifti1Image(
+        #     _manual_data, affine=pet_4d_img.affine,
+        # )
+        # Delete the cache file for step two. We're overriding it.
+        (results.args.cache_path /
+         f"sub-{results.args.subject}_k_step-{k_step}_centroids_and_fits.pkl"
+         ).unlink(missing_ok=True)
+
+        # Keep the old cluster, but take away its 'best_overall' flag.
+        best_of(centroids).best_overall = False
+        # Add the new cluster, and flag it as the 'best_overall'.
+        _manual_centroid.best_overall = True
+        centroids.append(_manual_centroid)
+
+        return _manual_centroid, _manual_data
+
+    # If asked, override the k-means decision. Centroids are modified in place,
+    # so the returned objects are convenient, but not necessary.
+    if (step == 1) and results.args.override_step_1_cluster:
+        _ = _override(
+            step, results.args.override_step_1_cluster
+        )
+
+    # If we were asked to use an alternative cluster explicitly, do so.
+    if (step == 2) and results.args.override_step_2_cluster:
+        _ = _override(
+            step, results.args.override_step_2_cluster
+        )
+
+    # We really don't care about non-vascular centroids,
+    # but we track them all so we can put them back together
+    # after replacing vascular centroids with new ones including spatial info.
+    vascular_centroids = [
+        c for c in centroids
+        if c.features.get("likely_vascular", False)
+    ]
+    other_centroids = [c for c in centroids if c not in vascular_centroids]
+
+    # To calculate debug/spatial info, each centroid needs to carry a
+    # reference to its 1-based labels. But only the 'best_in_k' centroids
+    # were previously paired with their labels. We don't really want to save
+    # 200 copies of multi-GB images when we write the results object to disk.
+    # But we need to pair labels w/vascular clusters to calculate_spatial_info.
+    for c in vascular_centroids:
+        a = c.labels if c.labels is not None else np.zeros((0,))
+        logger.debug(f"C {c.label}/{c.k} labels {a.shape}")
+        c.labels = k_means_model_fits[c.k].labels_ + 1
+    # Send centroids off to be run in multiple processes
+    # Separate processes cannot share memory, so we do the calculations,
+    # then overwrite our vascular centroids list with the new ones.
+    # Then we need to weave these new centroids into the original list.
+    vascular_centroids = calculate_spatial_info(
+        vascular_centroids,
+        step, logger, num_cpus=results.args.num_cpus
+    )
+    logger.info("Calculating centroid similarity and k-stability")
+    sim_mat = build_similarity(vascular_centroids)
+    calculate_k_stability(vascular_centroids, sim_mat)
+    logger.info("Calculating axis weights for detecting neck noise.")
+    calculate_axis_weights(vascular_centroids)
+
+    if (
+            (step == 1) and
+            (results.args.reduce_step_one_sparsity != 0)
+    ):
+        # Make a copy of the current best centroid,
+        # and modify the copy to remove the smallest blobs.
+        # Then re-calculate spatial info and continue with it.
+        original_best_centroid = best_of(vascular_centroids)
+        new_mask = original_best_centroid.mask_in_3d(
+            sparsity_threshold=results.args.reduce_step_one_sparsity,
+            logger=results.logger,
+        )
+        new_best_centroid, new_manual_data = fake_centroid_from_mask(
+            new_mask, original_best_centroid, pet_4d_img,
+        )
+        reduced_ratio = new_best_centroid.features.get('reduced_ratio', 0.0)
+        new_best_centroid.name = (
+            f"{original_best_centroid.name} "
+            f"({reduced_ratio:0.0%} reduced)"
+        )
+        new_best_centroid.source = "sparsity reduction"
+        # best_cluster_as_image = nib.nifti1.Nifti1Image(
+        #     new_manual_data, affine=pet_4d_img.affine,
+        # )
+        # The former champion has been displaced. :-(
+        original_best_centroid.best_overall = False
+        # Provide a key for the plotter to include this TAC, too.
+        original_best_centroid.features['former_champion'] = True
+        vascular_centroids.append(new_best_centroid)
+
+    # If spatial information convinces us to abandon our original k-means
+    # cluster selection, override it with a new one.
+    alt_cluster_html = consider_alternate_clusters(
+        vascular_centroids, k_means_model_fits, pet_4d_img,
+        verbose=results.args.verbose, logger=logger
+    )
+    for line in alt_cluster_html:
+        rpt_sect.add_line(line)
+
+    """
+    updated_centroids = list()
+    for i, old_centroid in enumerate(centroids):
+        updated = False
+        for new_centroid in vascular_centroids:
+            if new_centroid.label == old_centroid.label:
+                if new_centroid.k == old_centroid.k:
+                    updated_centroids.append(new_centroid)
+                    updated = True
+        if not updated:
+            updated_centroids.append(old_centroid)
+    """
+    all_centroids = sorted(
+        vascular_centroids + other_centroids,
+        key=lambda c: (c.k, c.label),
+    )
+    if results.args.debug:
+        sim_mat.to_csv(results.args.debug_path / f"dice_step_{step}.csv")
+        # noinspection PyTypeChecker
+        pickle.dump(
+            all_centroids,
+            open(results.args.debug_path / f"step-{step}_centroids.pkl", "wb")
+        )
+
+    return all_centroids
+
+
 def load_or_calculate_clusters(
-        results, cluster_function, source_4d_image, ks, step, logger=None
+        results, cluster_function, source_4d_image, ks, step, report_section, logger=None
 ):
     """ Treat data as either 4D Nifti1Image or 2D array
 
         :param results: Results object
         :param cluster_function: function that takes k and label as input and
         :param source_4d_image: 4D PET activity image, may differ from i
+        :param ks: list of k values for running repeated k-means
+        :param step: Which step in two-step k-means, 1 or 2
+        :param report_section: Part of the report we can write to
+        :param logger: where to stream info/debug/warnings
+        :return: dict containing several results
     """
+
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # If prior models were saved to disk, load them rather than running.
     cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
@@ -242,53 +418,42 @@ def load_or_calculate_clusters(
         results.args.cache_path, cache_file, results.args.force
     )
     if cached_data is None:
-        # Interpret Nifti1Image as input data
-        data = flatten_4d_to_2d(source_4d_image.get_fdata(), zxy=True)
-
         # Calculate the clusters via k-means with multiprocessing
-        centroids, model_fits = cluster_function(
-            data, ks,
+        all_centroids, model_fits = cluster_function(
+            source_4d_image, ks, step,
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             verbose=results.args.verbose,
-            logger=results.logger,
+            logger=logger,
         )
-        # Spatial analyses require the shape of the cluster's source image
-        for centroid in centroids:
-            centroid.original_shape = source_4d_image.shape
-        if (
-                (not results.args.no_cluster_override) and
-                (not results.args.override_step_1_cluster)
-        ):
-            consider_alternate_clusters(
-                centroids, model_fits, source_4d_image,
-                verbose=results.args.verbose, logger=logger
-            )
+
+        # Replace all_centroids with a similar list, but tweaked and filled in
+        all_centroids = post_process_clusters(
+            all_centroids, model_fits, source_4d_image, results, step,
+            report_section, logger=logger
+        )
 
         # Save the results, so we can just load them if there's a next time.
         to_cache(
-            (data, centroids, model_fits),
+            (all_centroids, model_fits),
             results.args.cache_path, cache_file
         )
     else:
-        (data, centroids, model_fits) = cached_data
+        (all_centroids, model_fits) = cached_data
         results.logger.info(f"  loaded cached step {step} k-means to save time")
 
-    # Label the best centroid for proper figure legend
-    for c in centroids:
-        if c.best_in_k:
-            c.name = f"Best step {step}. {c.name}"
-
     # Generate the masked data, with only the best centroid's data from step 1.
-    best_centroid_masked_data = np.zeros(data.shape)
-    best_centroid = best_of(centroids)
-    best_labels = model_fits[best_centroid.k].labels_ + 1
-    top_cluster_mask = (best_labels == best_centroid.label)
-    best_centroid_masked_data[top_cluster_mask] = data[top_cluster_mask, :]
+    best_centroid = best_of(all_centroids)
+    if best_centroid.labels is None:
+        best_centroid.labels = model_fits[best_centroid.k].labels_ + 1
+    top_cluster_mask = (best_centroid.labels == best_centroid.label)
+    pet_2d_data = flatten_4d_to_2d(source_4d_image.get_fdata(), zxy=True)
+    best_centroid_masked_data = np.zeros(pet_2d_data.shape)
+    best_centroid_masked_data[top_cluster_mask] = pet_2d_data[top_cluster_mask, :]
 
     # Return atlas and mask in down-sampled space if we down-sampled
     best_atlas, best_mask = make_atlas_and_mask(
-        best_centroid, best_labels, image.mean_img(source_4d_image),
+        best_centroid, best_centroid.labels, image.mean_img(source_4d_image),
         resample_to=None,
     )
     best_cluster_as_image = nib.nifti1.Nifti1Image(
@@ -299,18 +464,15 @@ def load_or_calculate_clusters(
         affine=source_4d_image.affine,
     )
 
-    results.cluster_centroids[step] = centroids
+    results.cluster_centroids[step] = all_centroids
     results.cluster_model_fits[step] = model_fits
-
+    # As far as I can tell, only 'best_centroid' and 'best_cluster_as_image' get used. So we could probably clean this up. Two lines above also cover some of it.
     return {
-        'data': data,
-        'centroids': centroids,
+        'centroids': all_centroids,
         'fits': model_fits,
         'best_centroid': best_centroid,
-        'best_labels': best_labels,
         'best_data': best_centroid_masked_data,
         'best_atlas': best_atlas,
-        'best_mask': best_mask,
         'best_cluster_as_image': best_cluster_as_image,
     }
 
@@ -328,15 +490,9 @@ def save_table_of_centroid_stats(results, step):
             c, return_features=True, skip_t0=True
         )
         c.features["line_wo_first"] = {"slope": m2, "intercept": b2}
-        if results.args.debug:
-            results.logger.debug(
-                f"Analyzing spatial clusters for step {step}, k {c.label}/{c.k}"
-            )
-            c.update_spatial_clusters(
-                results.cluster_model_fits[step][c.k].labels_ + 1,
-                verbose=results.args.verbose,
-                logger=results.logger
-            )
+        if results.args.debug and (c.labels is None):
+            c.labels = results.cluster_model_fits[step][c.k].labels_ + 1
+
     # And now, build the table and write it with other results.
     centroid_table = pd.concat([
         tabulate_centroids(
@@ -366,6 +522,11 @@ def save_table_of_centroid_stats(results, step):
 
         centroid_data_columns.append(f"l-{c.label}_k-{c.k}")
         centroid_data_values.append(c.activity)
+        if c.best_overall:
+            if c.blob_data is None:
+                print("WTF!?!? The best centroid has no blob data!")
+            else:
+                c.blob_data.to_csv(results.args.debug_path / "best_cluster_blobs.csv")
 
     centroid_data = pd.DataFrame(
         data=np.vstack(centroid_data_values).T,
@@ -377,6 +538,62 @@ def save_table_of_centroid_stats(results, step):
         results.args.debug_path / filename,
         index=True, float_format='%0.5f'
     )
+
+
+def fake_centroid_from_mask(
+        new_mask,
+        basis_centroid,
+        pet_4d_img,
+):
+    """ Prepare a centroid with fake clustering data from a provided mask
+
+        :param new_mask: Path to the mask or an ndarray containing a mask
+        :param basis_centroid: Current centroid, calculated by k-means
+        :param pet_4d_img: The data used to calculate basis_centroid
+        :return: centroid
+    """
+
+    # Load alternate mask and use it to build a fake cluster centroid
+    if isinstance(new_mask, str) or isinstance(new_mask, PurePath):
+        _fake_3d_mask = nib.Nifti1Image.from_filename(new_mask)
+        print(f" |fc| Loaded {_fake_3d_mask.shape}-shaped mask from disk ('{new_mask}')")
+    else:
+        _fake_3d_mask = nib.Nifti1Image(new_mask, pet_4d_img.affine)
+        print(f" |fc| Made {new_mask.shape}-shaped new_mask into a Nifti1Image")
+    if _fake_3d_mask.shape != basis_centroid.original_shape[:3]:
+        _fake_3d_mask = image.resample_img(
+            _fake_3d_mask,
+            target_affine=basis_centroid.original_affine,
+            interpolation='nearest',
+            target_shape=basis_centroid.original_shape[:3],
+        )
+        print(f" |fc| Resampled mask to {_fake_3d_mask.shape} with "
+              f"{np.sum(_fake_3d_mask):,} hot voxels.")
+    _fake_flat_mask = np.squeeze(flatten_4d_to_2d(
+        np.expand_dims(_fake_3d_mask.get_fdata(), 3),
+    )).astype(bool)
+    print(f" |fc| Flattened mask to {_fake_flat_mask.shape} with "
+          f"{np.sum(_fake_flat_mask):,} hot voxels.")
+    # For a pre-existing centroid, keep the same label, and match the mask.
+    # _fake_flat_mask = np.multiply(
+    #     _fake_flat_mask, basis_centroid.label
+    # )
+    # Create a centroid based on the fake override mask.
+    # curr_2d_data = flatten_4d_to_2d(pet_4d_img.get_fdata())
+    new_centroid = copy.deepcopy(basis_centroid)
+    # masked_2d_data = np.zeros(curr_2d_data.shape)  # a millionish x 25ish
+    masked_2d_data = flatten_4d_to_2d(pet_4d_img.get_fdata())[_fake_flat_mask, :]
+    new_centroid.activity = np.mean(masked_2d_data, axis=0)
+    new_centroid.source = "manual override"
+    new_centroid.labels = _fake_flat_mask.astype(np.uint8) * new_centroid.label
+    new_centroid.update_spatial_clusters(force_update=True)
+
+    print(f" |fc| [{', '.join([f'{a:0.1f}' for a in new_centroid.activity])}]")
+    print(f" |fc| {new_centroid.blob_data.shape}-shaped blob_data")
+
+    # Return the real data, masked by the new mask, to be fed into step two.
+
+    return new_centroid, masked_2d_data
 
 
 def resample_for_clustering(original_image, resample_string, logger=None):
@@ -495,12 +712,14 @@ def two_step_cluster(results):
     # -------------------------------------------------------------------------
 
     k_means_results[1] = load_or_calculate_clusters(
-        results, cluster_function, curr_4d_pet_img, step_one_ks, 1
+        results, cluster_function, curr_4d_pet_img,
+        step_one_ks, 1, rpt_sect, logger=logger
     )
     rpt_sect.add_line(str(k_means_results[1]['best_centroid']))
     save_table_of_centroid_stats(results, 1)
     step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
-        k_means_results[1]['best_centroid'], k_means_results[1]['best_labels'],
+        k_means_results[1]['best_centroid'],
+        k_means_results[1]['best_centroid'].labels,
         curr_3d_pet_img, out_path=results.args.output_path / "masks",
         file_desc=f"step-{1}_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -510,7 +729,7 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
             k_means_results[1]['best_centroid'],
-            k_means_results[1]['best_labels'],
+            k_means_results[1]['best_centroid'].labels,
             curr_3d_pet_img, out_path=results.args.output_path / "masks",
             file_desc=f"step-{1}_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -532,72 +751,17 @@ def two_step_cluster(results):
     # Overlaying HarvardOxford atlas regions in fsleyes lays them atop the
     # NEW Nifti1 space, not the original SpmAnalyze space.
 
-    if results.args.override_step_1_cluster is not None:
-        # Load alternate mask and use it for step 1 cluster results.
-        results.best_vascular_mask_path[1] = results.args.override_step_1_cluster
-        rpt_sect.add_line(f"Step 1 cluster was overridden by external mask.")
-        step_1_fake_3d_mask = nib.Nifti1Image.from_filename(
-            results.args.override_step_1_cluster
-        )
-        if step_1_fake_3d_mask.shape != k_means_results[1]['best_mask']:
-            step_1_fake_3d_mask = image.resample_img(
-                step_1_fake_3d_mask,
-                target_affine=k_means_results[1]['best_mask'].affine,
-                interpolation='nearest',
-                target_shape=k_means_results[1]['best_mask'].shape,
-            )
-        k_means_results[1]['best_mask'] = step_1_fake_3d_mask
-        step_1_fake_flat_mask = flatten_4d_to_2d(
-            np.expand_dims(step_1_fake_3d_mask.get_fdata(), 3)
-        ).astype(bool).ravel()
-        curr_2d_data = flatten_4d_to_2d(curr_4d_pet_img.get_fdata())
-        fake_2d_data = np.zeros(curr_2d_data.shape)
-        fake_2d_data[step_1_fake_flat_mask] = curr_2d_data[step_1_fake_flat_mask, :]
-        # Create a centroid based on the fake override mask.
-        real_best_centroid = k_means_results[1]['best_centroid']
-        fake_best_centroid = Centroid(
-            activity=np.mean(curr_2d_data[step_1_fake_flat_mask], axis=0),
-            timepoints=real_best_centroid.timepoints,
-            label=1,  # should be non-zero as zero indicates background
-            k=1,
-            name=f"Forced best step 1. centroid 1/1",
-            source="manual override",
-            voxel_count=np.sum(step_1_fake_flat_mask),
-            labels=step_1_fake_flat_mask.astype(np.uint8),
-        )
-        # Prepare the actual data fed into step two.
-        k_means_results[1]['best_centroid'] = fake_best_centroid
-        k_means_results[1]['best_cluster_as_image'] = nib.nifti1.Nifti1Image(
-            unflatten_2d_to_4d(fake_2d_data, curr_4d_pet_img.shape),
-            affine=curr_4d_pet_img.affine,
-        )
-        k_means_results[1]['best_labels'] = fake_best_centroid.labels
-
-        # Delete the cache file for step two. We're overriding it.
-        cache_file = "sub-{}_step-1-2_centroids_and_fits.pkl".format(
-            results.args.subject,
-        )
-        (results.args.cache_path / cache_file).unlink(missing_ok=True)
-
-        # Save data for debugging and reporting
-        pickle.dump(
-            {
-                'orig_best_centroid_1': real_best_centroid,
-                'fake_best_centroid_1': fake_best_centroid,
-            },
-            open(results.args.debug_path / "step_one_override.pkl", "wb"),
-        )
-
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
     k_means_results[2] = load_or_calculate_clusters(
         results, cluster_function, k_means_results[1]['best_cluster_as_image'],
-        step_two_ks, 2,
+        step_two_ks, 2, rpt_sect, logger=logger
     )
     rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
     save_table_of_centroid_stats(results, 2)
     step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
-        k_means_results[2]['best_centroid'], k_means_results[2]['best_labels'],
+        k_means_results[2]['best_centroid'],
+        k_means_results[2]['best_centroid'].labels,
         curr_3d_pet_img, out_path=results.args.output_path / "masks",
         file_desc=f"step-2_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -607,7 +771,7 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
             k_means_results[2]['best_centroid'],
-            k_means_results[2]['best_labels'],
+            k_means_results[2]['best_centroid'].labels,
             curr_3d_pet_img, out_path=results.args.output_path / "masks",
             file_desc=f"step-2_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -658,13 +822,17 @@ def two_step_cluster(results):
         )
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
+        # Before pickling, remove redundant copies of the huge label arrays.
+        for c in results.cluster_centroids[step]:
+            c.labels = None
         filename = "sub-{}_step-{}_kmeans_centroid.pkl".format(
             results.args.subject, step
         )
-        with open(results.args.output_path / "debug" / filename, "wb") as f:
-            pickle.dump(
-                best_of(results.cluster_centroids[step]), f
-            )
+        # noinspection PyTypeChecker
+        pickle.dump(
+            best_of(results.cluster_centroids[step]),
+            open(results.args.output_path / "debug" / filename, "wb")
+        )
 
         # Save out nifti masks (which ones conditional on verbosity)
         resample_template = curr_3d_pet_img
@@ -687,6 +855,7 @@ def two_step_cluster(results):
             for k in unique_ks:
                 cs_in_k = [c for c in results.cluster_centroids[step]
                            if c.k == k]
+                # noinspection PyTypeChecker
                 pickle.dump(
                     cs_in_k,
                     open(results.args.debug_path / "masks" /
@@ -702,4 +871,16 @@ def two_step_cluster(results):
 
     rpt_sect.end()
     results.write_report()
+
+    # Copy over a script to view the clusters
+    src_file = Path(__file__).parent.parent / "scripts" / "view_in_fsleyes.sh"
+    tgt_file = results.args.output_path / "view_in_fsleyes.sh"
+    logger.info("Copying 'view_in_fsleyes.sh' from '{}' to '{}'".format(
+        src_file.parent, tgt_file.parent
+    ))
+    tgt_file.write_text(src_file.read_text())
+    tgt_file.chmod(
+        tgt_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    )
+
     return results
