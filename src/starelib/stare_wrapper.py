@@ -89,6 +89,13 @@ def get_argument_parser():
              "'4mm' resamples to a resolution of 4mm isotropic."
     )
     parser.add_argument(
+        "--reduce-step-one-sparsity", type=int, default=0,
+        help="The threshold for removing small blobs within the best "
+             "cluster. A threshold of 10 will remove up to 10% of the voxels, "
+             "from the smallest blobs, leaving the largest, most contiguous "
+             "blobs, constituting at least 90% of the voxels."
+    )
+    parser.add_argument(
         "--latest-usable-volume", type=int, default=-1,
         help="Run STARE only on the earliest N volumes specified. "
              "This can be useful for time stability analyses."
