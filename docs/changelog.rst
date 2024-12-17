@@ -4,6 +4,17 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.10.1, 2024-12-20
+
+- Includes a new view_in_fsleyes.sh script for reviewing k-means clusters.
+- Includes a neck noise measure
+- Includes a sparsity measure
+- Allows for sparsity reduction with --reduce-step-one-sparsity
+- Reports potential alternate clusters in the html report.
+- Allows for stopping STARE after PVC
+- Changed --no-cluster-override option to --ignore-spatial-info
+- Complete restructuring of post-processing of k-means clusters
+
 Version 0.9.5, 2024-08-29
 
 - Introduce principal and independent components as a supplementary debugging
