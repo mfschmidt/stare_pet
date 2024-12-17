@@ -95,11 +95,10 @@ class Centroid(TimeActivityCurve):
             self.features['reduced_ratio'] = 1.0 - ratio
             if logger is not None:
                 plural = "s" if blobs_consumed > 1 else ""
-                logger.debug(f"Denoised cluster mask from {self.voxel_count:,}"
+                logger.debug(f"Reduced cluster mask from {self.voxel_count:,}"
                              f" voxels in {self.blob_count} blobs, to "
-                             f"{blobs_consumed} blob{plural} with "
-                             f"{voxels_consumed:,} voxels ("
-                             f"{ratio:0.1%}.")
+                             f"{voxels_consumed:,} voxels in "
+                             f"{blobs_consumed} blob{plural} ({ratio:0.1%}).")
 
             keeper_filter = self.blob_data['blob'].isin(keepers)
             df_in = self.blob_data.loc[keeper_filter, :]
