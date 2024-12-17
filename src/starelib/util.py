@@ -442,7 +442,7 @@ def get_cluster_blobs(array_3d, label=1, max_gap=1, verbose=0, messages=None):
     count_message = "; ".join([f"#{int(_labels[i])} has {_counts[i]:,}" for i in range(len(_labels))])
     messages.append(f"Found {len(_blobs.keys())} blobs for label {label}: [{count_message}]")
     if len(_blobs.keys()) < 1:
-        messages.append(print(f"nothing to store ({label}); bailing out"))
+        messages.append(  f"nothing to store (#{label}); bailing out")
         return None, list(), list()
 
     blob_data = pd.DataFrame(
@@ -645,7 +645,7 @@ def collapse_slices_3d(data, by=2, along=2):
         elif along == 2:
             _slice = np.mean(data[:, :, i_beg:i_end], axis=along)
             _data[:, :, i] = _slice
-        print(f"  {i}: {'None' if _slice is None else _slice.shape}")
+        # print(f"  {i}: {'None' if _slice is None else _slice.shape}")
 
     return _data
 
