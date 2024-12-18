@@ -35,6 +35,7 @@ def get_tsv_data(
     index_col = None
     sep = '\t'
     names = None
+    file_used = None
     subject_dir = Path(input_path) / subject_id
     if contents.lower() == "tacs":
         picnic_tacs = list(subject_dir.glob(
@@ -69,11 +70,13 @@ def get_tsv_data(
         return None, None
 
     f, data = None, None
+    logger.debug(f"Looking for {contents.lower()} files...")
     for f in possible_files:
         if f.exists():
             if data is None:
                 # Load the first file found
-                logger.info(f"Reading {contents.lower()} file '{f}'")
+                file_used = f
+                logger.info(f"  reading {contents.lower()} file '{f}'")
                 if contents.lower() in ["midtimes", "mid-times", "mid_times"]:
                     if f.name.endswith(".txt"):
                         # For one-column naked text files, no header and 1 col
@@ -90,12 +93,13 @@ def get_tsv_data(
                 logger.debug(f"  {contents} data shaped {data.shape}")
             else:
                 # Ignore files found after we loaded the first
-                logger.warning(f"Ignoring extra {contents} file '{f}'")
-
+                logger.debug(f"  ignoring extra {contents} file '{f}'")
+        else:
+            logger.debug(f"  tried '{f}', it wasn't there.")
     if data is None:
         return data, possible_files
     else:
-        return data, f
+        return data, file_used
 
 
 def get_tacs(results):
@@ -439,9 +443,9 @@ def gather_data(results):
         if len(results.tacs.columns) < len(args.regions):
             dropped_regions = [r for r in args.regions
                                if r not in results.tacs.columns]
-            logger.warning("Specified regions were NOT found in the TACs:")
+            logger.error("Specified regions were NOT found in the TACs:")
             for region in dropped_regions:
-                logger.warning(f"   {region}")
+                logger.error(f"   {region}")
         logger.info(f"Running with {len(results.tacs.columns)} regions:"
                     f"    [{', '.join(results.tacs.columns)}]")
         rpt_sect.add_line("Loaded TACs from " 
