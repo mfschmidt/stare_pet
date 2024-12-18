@@ -2,11 +2,10 @@ from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import numpy as np
-import re
 import platform
 import multiprocessing
 import os
-
+from importlib.metadata import version, PackageNotFoundError
 
 # This can be overridden when someone creates a Report or Section object,
 # but all datetimes will be represented as text with this format otherwise.
@@ -119,54 +118,23 @@ class Report:
         self.title = title
         self.path = Path(file).resolve()
         self.sections = []
-        self.app_name = "N/A"
-        self.app_version = "N/A"
+        self.app_name = "stare_pet"
+        self.app_version = self.find_version()
         if logger is None:
             self.logger = logging.getLogger(title)
         else:
             self.logger = logger
-        self.find_version()
+
 
     def __str__(self):
         return (f"A report, titled \"{self.title}\", "
                 f"with {len(self.sections)} sections")
 
     def find_version(self):
-        depth = 0
-        # Check docker locations first, in case we're running in docker,
-        # then wherever we were pip installed.
-        for here in [
-            Path("/stare_pet"), Path("/venv"), Path(__file__).parent,
-        ]:
-            self.logger.debug(
-                f"Finding version, looking for setup.cfg in {str(here)}"
-            )
-            while depth < 5 and not (here / "setup.cfg").exists():
-                depth += 1
-                here = here.parent
-                self.logger.debug(
-                    f"  Finding version, looking for setup.cfg in {str(here)}"
-                )
-            if (here / "setup.cfg").exists() and self.app_version == "N/A":
-                self.logger.debug(
-                    f"  Found config file at {str(here)}"
-                )
-                with open(here / "setup.cfg", "r") as f:
-                    for line in f:
-                        match_name = re.match(
-                            r"name = ([A-Za-z_]*)", line
-                        )
-                        if match_name:
-                            self.app_name = match_name.group(1)
-                        match_version = re.match(
-                            r"version = ([0-9]\.[0-9]\.[0-9])", line
-                        )
-                        if match_version:
-                            self.app_version = match_version.group(1)
-                self.logger.debug(
-                    f"  found '{self.app_name}', '{self.app_version}', "
-                    f"via {str(here / 'setup.cfg')}."
-                )
+        try:
+            return version(self.app_name)
+        except PackageNotFoundError as e:
+            return "N/A"
 
     @property
     def start_time(self):
