@@ -42,7 +42,8 @@ def get_tsv_data(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
         old_school_tacs = [subject_dir / "raw" / f"{subject_id}.tacs.tsv",
-                           subject_dir / f"{subject_id}.TACs", ]
+                           subject_dir / f"{subject_id}.TACs",
+                           subject_dir / f"{subject_id}_FS_TACs.csv", ]
         alternate_tacs = [subject_dir / "tacs.txt",
                           subject_dir / "BS_Stats" / "coreg" / subject_id, ]
         possible_files = picnic_tacs + old_school_tacs + alternate_tacs
@@ -82,6 +83,8 @@ def get_tsv_data(
                         # For one-column naked text files, no header and 1 col
                         header = None
                         names = ['t', ]
+                if f.name.endswith(".csv"):
+                    sep = ','
                 data = pd.read_csv(
                     f, header=header, index_col=index_col,
                     sep=sep, names=names,
