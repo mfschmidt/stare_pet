@@ -256,17 +256,17 @@ def plot_top_centroids_atlas(
         return plt.figure()
 
     # Extract image data, or create empty data to fill-in
-    mean_pet_img = image.mean_img(pet4d_img)
+    mean_pet_img = image.mean_img(pet4d_img, copy_header=True)
     if step_1_mask_img is None:
         step_1_data = np.zeros(mean_pet_img.shape)
     elif len(step_1_mask_img.shape) > 3:
-        step_1_data = image.mean_img(step_1_mask_img).get_fdata()
+        step_1_data = image.mean_img(step_1_mask_img, copy_header=True).get_fdata()
     else:
         step_1_data = step_1_mask_img.get_fdata()
     if step_2_mask_img is None:
         step_2_data = np.zeros(mean_pet_img.shape)
     elif len(step_2_mask_img.shape) > 3:
-        step_2_data = image.mean_img(step_2_mask_img).get_fdata()
+        step_2_data = image.mean_img(step_2_mask_img, copy_header=True).get_fdata()
     else:
         step_2_data = step_2_mask_img.get_fdata()
 

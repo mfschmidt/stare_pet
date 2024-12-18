@@ -29,8 +29,8 @@ from .components import decompose_components
 
 
 def make_atlas_and_mask(
-        centroid, labels, template_img,
-        out_path=None, file_desc=None, logger=None,
+        centroid, template_img,
+        labels=None, out_path=None, file_desc=None, logger=None,
         resample_to=None, pad_to=None,
 ):
     """ Save a centroid's cluster as a mask.
@@ -53,6 +53,9 @@ def make_atlas_and_mask(
     """
 
     logger = logging.getLogger("STARE") if logger is None else logger
+
+    if labels is None:
+        labels = centroid.labels
 
     # Shape the voxel labels into a 3d matrix to match the template image.
     target_img = template_img
@@ -169,7 +172,8 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                 this_mask_path = mask_path / "other"
             this_mask_path.mkdir(exist_ok=True)
             atlas_nifti_file_path, mask_nifti_file_path = make_atlas_and_mask(
-                centroid, fits[centroid.k].labels_ + 1, current_template,
+                centroid, current_template,
+                labels=fits[centroid.k].labels_ + 1,
                 out_path=this_mask_path,
                 resample_to=resample_to_template,
                 logger=logger,
@@ -455,7 +459,7 @@ def load_or_calculate_clusters(
 
     # Return atlas and mask in down-sampled space if we down-sampled
     best_atlas, best_mask = make_atlas_and_mask(
-        best_centroid, best_centroid.labels, image.mean_img(source_4d_image),
+        best_centroid, image.mean_img(source_4d_image, copy_header=True),
         resample_to=None,
     )
     best_cluster_as_image = nib.nifti1.Nifti1Image(
@@ -700,9 +704,9 @@ def two_step_cluster(results):
     curr_4d_pet_img, data_are_resampled = resample_for_clustering(
         results.cropped_4D, results.args.resample_for_clustering, logger=logger
     )
-    orig_3d_pet_img = image.mean_img(results.input_4D)
-    crop_3d_pet_img = image.mean_img(results.cropped_4D)
-    curr_3d_pet_img = image.mean_img(curr_4d_pet_img)
+    orig_3d_pet_img = image.mean_img(results.input_4D, copy_header=True)
+    crop_3d_pet_img = image.mean_img(results.cropped_4D, copy_header=True)
+    curr_3d_pet_img = image.mean_img(curr_4d_pet_img, copy_header=True)
 
     # Have somewhere to store results from step one and two clustering
     k_means_results = dict()
@@ -721,7 +725,6 @@ def two_step_cluster(results):
     save_table_of_centroid_stats(results, 1)
     step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
         k_means_results[1]['best_centroid'],
-        k_means_results[1]['best_centroid'].labels,
         curr_3d_pet_img, out_path=results.args.output_path / "masks",
         file_desc=f"step-{1}_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -731,7 +734,6 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
             k_means_results[1]['best_centroid'],
-            k_means_results[1]['best_centroid'].labels,
             curr_3d_pet_img, out_path=results.args.output_path / "masks",
             file_desc=f"step-{1}_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -763,7 +765,6 @@ def two_step_cluster(results):
     save_table_of_centroid_stats(results, 2)
     step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
         k_means_results[2]['best_centroid'],
-        k_means_results[2]['best_centroid'].labels,
         curr_3d_pet_img, out_path=results.args.output_path / "masks",
         file_desc=f"step-2_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
@@ -773,7 +774,6 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
             k_means_results[2]['best_centroid'],
-            k_means_results[2]['best_centroid'].labels,
             curr_3d_pet_img, out_path=results.args.output_path / "masks",
             file_desc=f"step-2_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
