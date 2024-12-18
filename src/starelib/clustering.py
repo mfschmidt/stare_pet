@@ -326,6 +326,17 @@ def post_process_clusters(
         vascular_centroids,
         step, logger, num_cpus=results.args.num_cpus
     )
+    num_replacements = 0
+    for i, cent_a in enumerate(centroids):
+        for cent_b in vascular_centroids:
+            if (cent_a.label == cent_b.label) and (cent_a.k == cent_b.k):
+                # Replace the original centroid with the same one,
+                # but with spatial information
+                centroids[i] = cent_b
+                num_replacements += 1
+    print(f"replaced {num_replacements} of {len(vascular_centroids)} "
+          f"vascular centroids (of {len(centroids)} total centroids).")
+
     logger.info("Calculating centroid similarity and k-stability")
     sim_mat = build_similarity(vascular_centroids)
     calculate_k_stability(vascular_centroids, sim_mat)
@@ -360,7 +371,7 @@ def post_process_clusters(
         original_best_centroid.best_overall = False
         # Provide a key for the plotter to include this TAC, too.
         original_best_centroid.features['former_champion'] = True
-        vascular_centroids.append(new_best_centroid)
+        centroids.append(new_best_centroid)
 
     # If spatial information convinces us to abandon our original k-means
     # cluster selection, override it with a new one.
@@ -372,31 +383,15 @@ def post_process_clusters(
     for line in alt_cluster_html:
         rpt_sect.add_line(line)
 
-    """
-    updated_centroids = list()
-    for i, old_centroid in enumerate(centroids):
-        updated = False
-        for new_centroid in vascular_centroids:
-            if new_centroid.label == old_centroid.label:
-                if new_centroid.k == old_centroid.k:
-                    updated_centroids.append(new_centroid)
-                    updated = True
-        if not updated:
-            updated_centroids.append(old_centroid)
-    """
-    all_centroids = sorted(
-        vascular_centroids + other_centroids,
-        key=lambda c: (c.k, c.label),
-    )
     if results.args.debug:
         sim_mat.to_csv(results.args.debug_path / f"dice_step_{step}.csv")
         # noinspection PyTypeChecker
         pickle.dump(
-            all_centroids,
+            centroids,
             open(results.args.debug_path / f"step-{step}_centroids.pkl", "wb")
         )
 
-    return all_centroids
+    return centroids
 
 
 def load_or_calculate_clusters(
