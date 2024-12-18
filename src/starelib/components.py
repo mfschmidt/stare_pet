@@ -70,7 +70,7 @@ def decompose_components(results, logger):
     out_path = results.args.debug_path / "components"
     out_path.mkdir(exist_ok=True)
     _img_4d = results.cropped_4D
-    _img_3d = mean_img(_img_4d)
+    _img_3d = mean_img(_img_4d, copy_header=True)
     max_t = _img_4d.shape[3] - 1
 
     # Prep the source PET data
