@@ -599,7 +599,7 @@ def build_similarity(centroids, order_by=None, logger=None):
     num_dices_duped = 0
     num_diagonals = 0
     mat_len = len(centroids)
-    dice_matrix = np.zeros((mat_len, mat_len))
+    dice_matrix = np.ones((mat_len, mat_len)) * 100.0
     row_index = list()
     col_index = list()
 
@@ -611,10 +611,10 @@ def build_similarity(centroids, order_by=None, logger=None):
             if str(c1) == str(c2):
                 dice_matrix[i, j] = 1.0
                 num_diagonals += 1
-            elif dice_matrix[i, j] != 0.0:
+            elif dice_matrix[i, j] < 99.0:
                 dice_matrix[j, i] = dice_matrix[i, j]
                 num_dices_duped += 1
-            elif dice_matrix[j, i] != 0.0:
+            elif dice_matrix[j, i] < 99.0:
                 dice_matrix[i, j] = dice_matrix[j, i]
                 num_dices_duped += 1
             else:
@@ -622,7 +622,7 @@ def build_similarity(centroids, order_by=None, logger=None):
                     np.ravel(c1.labels == c1.label),
                     np.ravel(c2.labels == c2.label),
                 )
-                # dice_matrix[i, j] = dice_matrix[j, i]
+                dice_matrix[j, i] = dice_matrix[i, j]
                 num_dices_calculated += 1
     _msg = (f"Cluster similarity: calculated {num_dices_calculated:,} / "
             f"{len(centroids) ** 2:,}, duped {num_dices_duped:,}, "
@@ -632,6 +632,8 @@ def build_similarity(centroids, order_by=None, logger=None):
     else:
         logger.info(_msg)
 
+    # No 100's should be left, but clear them out just in case.
+    dice_matrix[dice_matrix > 1.0] = 0.0
     return pd.DataFrame(dice_matrix, index=row_index, columns=col_index)
 
 
