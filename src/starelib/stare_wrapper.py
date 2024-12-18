@@ -1,13 +1,37 @@
 import os
+import sys
 import argparse
 from pathlib import Path
 from multiprocessing import cpu_count
 import warnings
+from importlib.metadata import version
 
 
 def get_argument_parser():
     """ Collect command line arguments """
 
+    # If the user calls us with --version, all other assumptions fail.
+    # They don't need a subject; their paths don't matter, etc.
+    # So parse just that first, then move along to the "real" parser.
+    version_arg_parser = argparse.ArgumentParser(
+        prog="stare_pet",
+        description="Execute the STARE pipeline.",
+        add_help=False,
+    )
+    version_arg_parser.add_argument(
+        "--version", action="store_true",
+    )
+    version_args, other_args = version_arg_parser.parse_known_args()
+    if version_args.version:
+        print(f"stare_pet v{version('stare_pet')}")
+        sys.exit(0)
+    else:
+        # No worries; let the next parser take it.
+        print("moving on, no --version arg.")
+        pass
+
+    # They didn't ask for --version, so we continue as usual.
+    # We include --version in these args to generate accurate usage.
     parser = argparse.ArgumentParser(
         description="Execute the STARE pipeline.",
     )
@@ -91,9 +115,9 @@ def get_argument_parser():
     parser.add_argument(
         "--reduce-step-one-sparsity", type=int, default=0,
         help="The threshold for removing small blobs within the best "
-             "cluster. A threshold of 10 will remove up to 10% of the voxels, "
+             "cluster. A threshold of 10 will remove up to 10%% of the voxels, "
              "from the smallest blobs, leaving the largest, most contiguous "
-             "blobs, constituting at least 90% of the voxels."
+             "blobs, constituting at least 90%% of the voxels."
     )
     parser.add_argument(
         "--latest-usable-volume", type=int, default=-1,
@@ -159,6 +183,10 @@ def get_argument_parser():
     parser.add_argument(
         "--num-cpus", default="",
         help="where parallel processing is supported, use this many processes",
+    )
+    parser.add_argument(
+        "--version", action="store_true",
+        help="If specified, print the version and exit.",
     )
 
     return parser
@@ -259,9 +287,3 @@ def validate_arguments(args):
 
     # Good to continue on
     return True
-
-
-def make_pvc_tac(results):
-    """ A stub that does nothing, yet """
-
-    return results
