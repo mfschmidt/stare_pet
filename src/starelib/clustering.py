@@ -360,8 +360,9 @@ def post_process_clusters(
 
     # If spatial information convinces us to abandon our original k-means
     # cluster selection, override it with a new one.
+    # Pass all centroids so it can report the ratio of vascular/all
     alt_cluster_html = consider_alternate_clusters(
-        vascular_centroids, k_means_model_fits, pet_4d_img,
+        centroids, k_means_model_fits, pet_4d_img,
         verbose=results.args.verbose, logger=logger
     )
     for line in alt_cluster_html:
