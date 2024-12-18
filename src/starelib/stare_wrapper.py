@@ -212,7 +212,7 @@ def validate_arguments(args):
     if Path(args.input_path).exists():
         if not (Path(args.input_path) / args.subject).exists():
             errors.append(f"There is no subject '{args.subject}' "
-                          "at '{args.input_path}'.")
+                          f"at '{args.input_path}'.")
     else:
         errors.append(f"The input path, '{args.input_path}' does not exist.")
     if args.tac_file is not None:
