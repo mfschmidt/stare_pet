@@ -27,7 +27,6 @@ def get_argument_parser():
         sys.exit(0)
     else:
         # No worries; let the next parser take it.
-        print("moving on, no --version arg.")
         pass
 
     # They didn't ask for --version, so we continue as usual.
