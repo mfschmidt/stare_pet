@@ -219,6 +219,9 @@ def calculate_axis_weights(centroids):
         """
 
         # Calculate a score to indicate the cluster is dominated by neck noise.
+        # These weights roughly add the proportion of voxels in the lowest 12 slices,
+        # and ignore everything else. So a score of 0.50 would indicate that about
+        # half the voxels are in the bottom 12 axial slices.
         def custom_inverse_sigmoid(x):
             return 1.0 - (1 / (1 + 3 ** (-1 * (x - 12)))) ** (1 / 2)
         weights = custom_inverse_sigmoid(np.linspace(start, stop, len(density)))
@@ -658,10 +661,12 @@ def consider_alternate_clusters(
     # Before beginning, locate the current selection of "best" centroid.
     # While doing this, count vascular centroids for a narrative report.
     first_choice_centroid = None
+    vascular_centroids = list()
     num_vascular_total = 0
     num_vascular_per_k = dict()
     for c in centroids:
         if c.features.get("likely_vascular", False):
+            vascular_centroids.append(c)
             num_vascular_total += 1
             if c.k in num_vascular_per_k.keys():
                 num_vascular_per_k[c.k] += 1
@@ -673,8 +678,8 @@ def consider_alternate_clusters(
     if first_choice_centroid is None:
         raise ValueError("No centroid is selected as 'best'.")
 
-    html_lines.append(f"Overall, {num_vascular_total:,} centroids are "
-                      "likely to be vascular.")
+    html_lines.append(f"Overall, {num_vascular_total:,} of {len(centroids):,} "
+                      f"centroids are likely to be vascular.")
     html_lines.append("There are " + ", ".join([
         f"{v} from k={k}" for k, v in sorted(num_vascular_per_k.items())
     ]) + ".")
@@ -686,16 +691,21 @@ def consider_alternate_clusters(
         peak_idx = first_choice_centroid.peak_index + delay
         peak_t = first_choice_centroid.timepoints[peak_idx]
         centroids_at_peak = [
-            c for c in centroids if c.peak_index == peak_idx
+            c for c in vascular_centroids if c.peak_index == peak_idx
         ]
         if len(centroids_at_peak) < 1:
             # Hopefully, this will prevent extra empty tables for step two.
             break
+        elif len(centroids_at_peak) == 1:
+            plural_str, conj_str = "", "s"
+        else:
+            plural_str, conj_str = "s", ""
         html_table.append("<table>")
         html_table.append("<thead>")
         html_table.append(f"<tr><th colspan=\"9\">{len(centroids_at_peak)} "
-                          f"centroids peak at index {peak_idx} "
-                          f"(best + {delay}, t = {peak_t:0.3f})</th></tr>")
+                          f"centroid{plural_str} peak{conj_str} at index "
+                          f"{peak_idx} (best + {delay}, t = {peak_t:0.3f})"
+                          "</th></tr>")
         html_table.append(
             "<tr>"
             "<th>Cluster</th>"
@@ -757,7 +767,7 @@ def consider_alternate_clusters(
     # at the same, earliest time. For candidates to replace it,
     # only consider peaks at one time point later.
     centroids_with_alt_idx = [
-        c for c in centroids
+        c for c in vascular_centroids
         if ((c.peak_index == first_choice_centroid.peak_index + 1) &
             (c.features['likely_vascular']))
     ]
@@ -783,11 +793,12 @@ def consider_alternate_clusters(
             if alt_centroid.blob_count < first_choice_centroid.blob_count:
                 # We have an alternate centroid with a higher peak and a
                 # less spatially sparse clustering. We will use it.
-                logger.info(
+                html_lines.append(
                     f"Overriding the cluster selection with an alternate!!"
                     f" original best {first_choice_centroid.description()};"
                     f" new best is {alt_centroid.description()}."
                 )
+                """ TODO: In this version, we don't actually override yet.
                 first_choice_centroid.name = " ".join([
                     "Original", first_choice_centroid.name,
                 ])
@@ -796,6 +807,7 @@ def consider_alternate_clusters(
                     "Best by override.", alt_centroid.name,
                 ])
                 alt_centroid.best_overall = True
+                """
                 return html_lines
             else:
                 logger.info(f"An alternate, {alt_centroid.description()}, "
