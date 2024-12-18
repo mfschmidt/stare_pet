@@ -10,6 +10,7 @@ from datetime import datetime
 import pickle
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
+from importlib.resources import files
 
 from .util import (
     flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d,
@@ -873,14 +874,22 @@ def two_step_cluster(results):
     results.write_report()
 
     # Copy over a script to view the clusters
-    src_file = Path(__file__).parent.parent / "scripts" / "view_in_fsleyes.sh"
-    tgt_file = results.args.output_path / "view_in_fsleyes.sh"
-    logger.info("Copying 'view_in_fsleyes.sh' from '{}' to '{}'".format(
-        src_file.parent, tgt_file.parent
-    ))
-    tgt_file.write_text(src_file.read_text())
-    tgt_file.chmod(
-        tgt_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
+    try:
+        # If 'stare_pet' was installed, this is where we'll find it.
+        src_file = files('starelib.scripts').joinpath('view_in_fsleyes.sh')
+    except ModuleNotFoundError as e:
+        # If 'stare_pet' is running from source, we'll find it here.
+        src_file = Path(__file__).parent.parent / "scripts" / "view_in_fsleyes.sh"
+    if src_file.exists():
+        tgt_file = results.args.output_path / "view_in_fsleyes.sh"
+        logger.info("Copying 'view_in_fsleyes.sh' from '{}' to '{}'".format(
+            src_file.parent, tgt_file.parent
+        ))
+        tgt_file.write_text(src_file.read_text())
+        tgt_file.chmod(
+            tgt_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+    else:
+        logger.warning(f"I could not find the 'view_in_fsleyes.sh' script.")
 
     return results
