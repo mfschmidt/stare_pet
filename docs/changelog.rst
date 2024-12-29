@@ -4,10 +4,14 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.10.4, 2024-12-29
+
+- Change neck_noise to "inf_weighted_score", and make it heavy on bottom slice
+
 Version 0.10.1, 2024-12-20
 
 - Includes a new view_in_fsleyes.sh script for reviewing k-means clusters.
-- Includes a neck noise measure
+- Includes a neck noise measure, bottom 12ish slices
 - Includes a sparsity measure
 - Allows for sparsity reduction with --reduce-step-one-sparsity
 - Reports potential alternate clusters in the html report.
