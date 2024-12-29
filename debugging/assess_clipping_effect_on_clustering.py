@@ -186,7 +186,8 @@ def get_arguments():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Find STARE runs for a subject with different clipping. "
+            "Find already-completed STARE runs with different values of "
+            f"--clip-axial-slices for one subject. "
             "Create 3D plots of each k-means cluster, 2D plots of "
             "spatial statistics, and package them all into a video."
         ),
@@ -221,6 +222,15 @@ def get_arguments():
         ),
     )
     parser.add_argument(
+        "--camera-elevation",
+        default=10, type=int,
+        help=(
+            "The angle above the horizon for the camera observing the 3D scene."
+            " Default is looking slightly down onto the brain, angle 20. "
+            "To look up from below, negative values may be used."
+        ),
+    )
+    parser.add_argument(
         "--azimuth-center",
         default=90, type=int,
         help=(
@@ -233,7 +243,7 @@ def get_arguments():
     )
     parser.add_argument(
         "--azimuth-range",
-        default=60, type=int,
+        default=30, type=int,
         help=(
             "The range of rotation around 'azimuth-center', "
             "Half of this will be rotated left of center, "
@@ -247,6 +257,14 @@ def get_arguments():
         help=(
             "To aid in debugging plot placement on movie frames, paint "
             "red frames around subplots and text boxes."
+        ),
+    )
+    parser.add_argument(
+        "--include-pca",
+        action="store_true",
+        help=(
+            "If PCA data are found in the output directory, render their "
+            "masks alongside clusters in 3D plot."
         ),
     )
     parser.add_argument(
@@ -344,30 +362,72 @@ def make_clip_mesh(stare_out_path, slices_clipped, verbose=False):
     return clipping_cube
 
 
-def get_mesh_from_mask(stare_out_path, step):
+def remove_old_3d_files(stare_out_path):
+    """ Clean up any prior version STL or surf stuff. """
+
+    # All original files in this path should start with "clust*"
+    # So the s* files were all added by us and can be removed.
+    for old_file in stare_out_path.glob("masks/s*"):
+        printc(f"    removing {old_file}", c='orange')
+        old_file.unlink()
+
+
+def extract_pca_masks(stare_out_path, threshold=95):
+    """
+    :param stare_out_path: path to STARE output
+    :param threshold: percentile threshold for masking PCA weights
+    :return:
+    """
+
+    pca_file = stare_out_path / "debug" / "components" / "pca_6.nii.gz"
+    if pca_file.exists():
+        pca_img = nib.Nifti1Image.from_filename(pca_file)
+        mask_files = list()
+        for i in range(6):
+            pca_data = pca_img.get_fdata()[:, :, :, i].squeeze()
+            pca_mask = np.array(
+                pca_data > np.percentile(pca_data, threshold),
+                dtype=np.uint8
+            )
+            pca_mask_img = nib.Nifti1Image(pca_mask, pca_img.affine)
+            file_path = str(pca_file).replace("_6", f"_{i}_mask")
+            pca_mask_img.to_filename(file_path)
+            mask_files.append(Path(file_path))
+        return mask_files
+    return None
+
+
+def best_mask(stare_out_path, step):
+    """ Get the path to the best cluster mask from step 'step'
+    """
+
+    src_mask = Path(stare_out_path) / "masks" / f"cluster_step-{step}_best_mask_orig.nii.gz"
+    if not src_mask.exists():
+        src_mask = Path(stare_out_path) / "masks" / f"cluster_step-{step}_best_mask.nii.gz"
+    if not src_mask.exists():
+        printc(f"ERROR: I can't find a step {step} mask at "
+               f"'{str(stare_out_path)}'.", c="red")
+        return None
+    return src_mask
+
+
+def get_mesh_from_mask(mask_file, force_rebuild=False):
     """ Build a mesh from a 3D nifti mask.
     """
 
-    stl_file = Path(stare_out_path) / "masks" / f"step-{step}_mask.stl"
-    if not stl_file.exists():
-
+    mask_file = Path(mask_file)
+    stl_file = Path(str(mask_file).replace(".nii.gz", ".stl"))
+    surf_file = Path(str(mask_file).replace(".nii.gz", ".surf"))
+    if not stl_file.exists() or force_rebuild:
         # Extract vertices and faces from the volumetric Nifti file.
         mri_tessellate_cmd = find_fs_command('mri_tessellate')
-        src_mask = Path(stare_out_path) / "masks" / f"cluster_step-{step}_best_mask_orig.nii.gz"
-        if not src_mask.exists():
-            src_mask = Path(stare_out_path) / "masks" / f"cluster_step-{step}_best_mask.nii.gz"
-        if not src_mask.exists():
-            printc(f"ERROR: I can't find a step {step} mask at "
-                   f"'{str(stare_out_path)}'.", c="red")
-            return None
-        surf_file = Path(stare_out_path) / "masks" / f"step-{step}_mask.surf"
         p1 = subprocess.run(
-            [mri_tessellate_cmd, str(src_mask), "1", str(surf_file), ],
+            [mri_tessellate_cmd, "-n", str(mask_file), "1", str(surf_file), ],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         if p1.returncode != 0:
             printc(f"{p1.stderr.decode('utf-8')}", c="red")
-            printc(f"ERROR: I can't tessellate '{src_mask.name}' "
+            printc(f"ERROR: I can't tessellate '{mask_file.name}' "
                    f"to '{surf_file.name}'.", c="red")
             return None
 
@@ -386,23 +446,64 @@ def get_mesh_from_mask(stare_out_path, step):
     return mesh.Mesh.from_file(str(stl_file))
 
 
-def build_initial_3d_figure(s1_mesh, s2_mesh, clip_mesh):
+def build_initial_3d_figure(
+        stare_out_path,
+        s1_mesh=None, s2_mesh=None, clip_mesh=None,
+        pca0_mesh=None, pca1_mesh=None,
+):
     """ Build a 3d image of the vascular clusters
     """
+
+    # Find the original image shape
+    orig_mean_imgs = list(Path(stare_out_path).glob("sub-*_orig_mean.nii.gz"))
+    if len(orig_mean_imgs) == 0:
+        return None
+    img = nib.load(orig_mean_imgs[0])
+
+    # Figure out the extents of the image
+    x0, y0, z0 = coord_transform(0, 0, 0, img.affine)
+    x1, y1, z1 = coord_transform(img.shape[0], img.shape[1], img.shape[2], img.affine)
+    min_x, max_x = min(x0, x1), max(x0, x1)
+    min_y, max_y = min(y0, y1), max(y0, y1)
+    min_z, max_z = min(z0, z1), max(z0, z1)
 
     _fig = plt.figure(figsize=(10, 9), layout='tight')
     _axes = _fig.add_subplot(projection='3d')
 
     ls = LightSource(azdeg=225, altdeg=45.0)
 
-    # Create, color, and light the step 1 mesh
+    # Create, color, and light the PCA 0 mesh (blue/gray)
+    if pca0_mesh is not None:
+        pca0_alpha = 0.10
+        color_pca0 = np.array((0.8, 0.8, 1.0, pca0_alpha))
+        mesh_pca0 = mplot3d.art3d.Poly3DCollection(
+            pca0_mesh.vectors,
+            shade=False,
+            facecolors=color_pca0,
+            lightsource=ls
+        )
+        _axes.add_collection3d(mesh_pca0)
+
+    # Create, color, and light the step 1 mesh (green/gray)
+    if pca1_mesh is not None:
+        pca1_alpha = 0.10
+        color_pca1 = np.array((0.8, 1.0, 0.8, pca1_alpha))
+        mesh_pca1 = mplot3d.art3d.Poly3DCollection(
+            pca1_mesh.vectors,
+            shade=False,
+            facecolors=color_pca1,
+            lightsource=ls
+        )
+        _axes.add_collection3d(mesh_pca1)
+
+    # Create, color, and light the step 1 mesh (yellow)
     if s1_mesh is not None:
-        step_1_alpha = 0.20
+        step_1_alpha = 0.40
         color_step_1 = np.array((1.0, 1.0, 57 / 255.0, step_1_alpha))
         mesh_step_1 = mplot3d.art3d.Poly3DCollection(
             s1_mesh.vectors,
             shade=False,
-            color=color_step_1,
+            facecolors=color_step_1,
             lightsource=ls
         )
         _axes.add_collection3d(mesh_step_1)
@@ -468,7 +569,11 @@ def build_initial_3d_figure(s1_mesh, s2_mesh, clip_mesh):
     _axes.yaxis.pane.fill = False
     _axes.zaxis.pane.fill = False
 
-    _axes.view_init(azim=75, elev=20)  # This will be changed repeatedly later
+    _axes.view_init(azim=75, elev=10)  # This will be changed repeatedly later
+
+    _axes.set_xlim((min_x, max_x))
+    _axes.set_ylim((min_y, max_y))
+    _axes.set_zlim((min_z, max_z))
 
     return _fig, _axes
 
@@ -570,8 +675,9 @@ def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
 
 def build_rotated_plots(
         fig, axes, clip_threshold, subject_id,
-        middle_azimuth=90, azimuth_range=30, paint_debug_grids_on_slides=False,
-        work_dir="/var/tmp", verbose=False
+        middle_azimuth=90, azimuth_range=30, camera_elevation=10,
+        paint_debug_grids_on_slides=False,
+        work_dir="/var/tmp", leave_intermediates=False, verbose=False
 ):
     """ Build each frame of a movie by rotating fig around middle_azimuth.
     """
@@ -579,21 +685,30 @@ def build_rotated_plots(
     # Spin it around, saving images of each perspective
     start_azimuth = int(middle_azimuth - (azimuth_range / 2))
     end_azimuth = int(middle_azimuth + (azimuth_range / 2))
+    pairs_printed_this_line = 0
+    print("", flush=True)  # Start on a new line; the earlier prints used end="".
 
     for i, azimuth in enumerate(range(start_azimuth, end_azimuth + 1, 1)):
         if verbose:
             print(f" {azimuth:03d}", end="", flush=True)
         mask_file = Path(work_dir) / f"mask_3d_{azimuth:03d}.png"
-        axes.view_init(azim=azimuth, elev=10)
+        axes.view_init(azim=azimuth, elev=camera_elevation)
         fig.savefig(mask_file)
         make_frame_with_stats(mask_file, clip_threshold,
-                              title=f"Scanner Subject {subject_id}",
+                              title=f"Subject {subject_id}",
+                              leave_intermediates=leave_intermediates,
                               paint_debug_grids=paint_debug_grids_on_slides)
         frame_file = str(mask_file).replace("mask_3d", "frame")
         # Make another copy of the same file so the video can reverse
         dupe_num = end_azimuth + 1 + (end_azimuth - start_azimuth - i)
         if verbose:
-            print(f"/{dupe_num:03d},", end="", flush=True)
+            if pairs_printed_this_line > 8:
+                end_char = None
+                pairs_printed_this_line = 0
+            else:
+                end_char = ""
+                pairs_printed_this_line += 1
+            print(f"/{dupe_num:03d},", end=end_char, flush=True)
         dupe_frame_file = Path(work_dir) / f"frame_{dupe_num:03d}.png"
         shutil.copy(frame_file, dupe_frame_file)
     if verbose:
@@ -616,25 +731,33 @@ def combine_plots_into_movie(subject_id, clip_thresh, working_dir,
                        shell=True, cwd=str(working_dir))
     if p.returncode == 0:
         if verbose:
-            printc("ffmpeg good")
-            printc(p.stdout.decode("utf8"))
+            printc(f"  {movie_filename} successful")
+            # printc(p.stdout.decode("utf8"))
     else:
         print("ffmpeg failed")
         print(p.stderr.decode("utf8"))
 
     if not leave_intermediates:
         num_slides = 0
+        num_stats = 0
         for individual_slide in Path(working_dir).glob("frame_*.png"):
             num_slides += 1
             individual_slide.unlink()
+        for individual_stats in Path(working_dir).glob("stats_*.png"):
+            num_stats += 1
+            individual_stats.unlink()
         if verbose:
-            printc(f"  removed {num_slides} slides after making movie")
+            printc(f"  removed {num_stats} stats figures and "
+                   f"{num_slides} slides after making their movie.")
 
     return Path(working_dir) / movie_filename
 
 
 def make_stats_plots(metadata, slices_clipped):
     """ Make a grid of plots describing metadata.
+
+        This plot will be the full-size slide for each movie frame,
+        leaving white space to be overlaid with the 3D plot.
     """
 
     _fig = plt.figure(figsize=(8.5, 9), layout='tight')
@@ -645,6 +768,10 @@ def make_stats_plots(metadata, slices_clipped):
     k_filter = (metadata['k'] > 15)
     best_filter = metadata['best_overall']
     clip_filter = metadata['slices_clipped'] == slices_clipped
+    print(f"  make_stats_plots got slices_clipped={slices_clipped}; "
+          f"{len(metadata['slices_clipped'].unique())} unique values in data: "
+          f"[{', '.join([f'{v}' for v in metadata['slices_clipped'].unique()])}]; "
+          f"{len(metadata[clip_filter])} rows with {slices_clipped} clipped.")
 
     clip_ticks = [0, 5, 10, 15, 20, 25, 30]
 
@@ -652,7 +779,8 @@ def make_stats_plots(metadata, slices_clipped):
         ax = _fig.add_subplot(gs[row, 0])
         sns.stripplot(
             data=metadata[vasc_filter & step_filter & k_filter],
-            x='slices_clipped', y=y_var, color='gray', alpha=0.50, ax=ax,
+            x='slices_clipped', y=y_var, color='gray', alpha=0.50,
+            native_scale=True, ax=ax,
         )
         hi_filter = metadata[y_var] > 250000
         sns.scatterplot(
@@ -760,10 +888,10 @@ def gather_subject_directories(starting_path, subject_id):
     # TODO: Dedupe somehow, I only want one per clip. The 'si' thing is brittle
 
     stare_paths = list()
-    for sop in Path(starting_path).glob(f"cluster*/*{subject_id}"):
+    for sop in Path(starting_path).glob(f"clusters_nosr_0103*/*{subject_id}"):
         if (
                 (sop.name in [subject_id, f"sub-{subject_id}"]) and
-                ("si" not in sop.parent.name) and
+                # ("si" not in sop.parent.name) and
                 ("so" not in sop.parent.name)
         ):
                 stare_paths.append({
@@ -815,6 +943,8 @@ def main():
     # On the first pass, just collect the blob metadata.
     metadata_dataframes = list()
     for res_dir in stare_result_dirs:
+        if args.force:
+            remove_old_3d_files(res_dir['path'])
         for step in (1, 2):
             # Dataframes have a 'subject' and a 'step' column, so can be combined
             # after we add a 'slices_clipped' column.
@@ -836,14 +966,30 @@ def main():
     # On the second pass, build 3D plots, 2D plots, and annotations.
     for i, res_dir in enumerate(stare_result_dirs):
         if args.verbose:
-            print(f"{i + 1:02d}/{len(stare_result_dirs):02d}. "
-                  f"sub-{res_dir['subject_id']} "
-                  f"in subdir '{res_dir['clip_subdir']}' "
-                  f"clip-{res_dir['clip_thresh']:03d}")
-        step_1_mesh = get_mesh_from_mask(res_dir['path'], 1)
+            printc(f"{i + 1:02d}/{len(stare_result_dirs):02d}. "
+                   f"sub-{res_dir['subject_id']} "
+                   f"in subdir '{res_dir['clip_subdir']}' "
+                   f"clip-{res_dir['clip_thresh']:03d}",
+                   c="cyan")
+        # If PCA was requested, masks must be created then made into meshes
+        pca_0_mesh, pca_1_mesh = None, None
+        if args.include_pca:
+            pca_masks = extract_pca_masks(res_dir['path'])
+            if pca_masks is not None:
+                pca_0_mesh = get_mesh_from_mask(
+                    pca_masks[0], force_rebuild=args.force
+                )
+                # pca_1_mesh = get_mesh_from_mask(
+                #     pca_masks[1], force_rebuild=args.force
+                # )
+        step_1_mesh = get_mesh_from_mask(
+            best_mask(res_dir['path'], 1), force_rebuild=args.force
+        )
         if args.verbose:
             print(f"m1 ", end="", flush=True)
-        step_2_mesh = get_mesh_from_mask(res_dir['path'], 2)
+        step_2_mesh = get_mesh_from_mask(
+            best_mask(res_dir['path'], 2), force_rebuild=args.force
+        )
         if args.verbose:
             print(f"m2 ", end="", flush=True)
         clip_mesh = make_clip_mesh(res_dir['path'], res_dir['clip_thresh'])
@@ -852,7 +998,12 @@ def main():
 
         # Build the initial figure
         fig1, axes1 = build_initial_3d_figure(
-            step_1_mesh, step_2_mesh, clip_mesh,
+            res_dir['path'],
+            s1_mesh=step_1_mesh,
+            s2_mesh=step_2_mesh,
+            pca0_mesh=pca_0_mesh,
+            pca1_mesh=pca_1_mesh,
+            clip_mesh=clip_mesh,
         )
         if args.verbose:
             print(f"f1 ", end="", flush=True)
@@ -862,27 +1013,37 @@ def main():
         fig2.savefig(
             Path(args.work_path) / f"stats_{res_dir['clip_thresh']:03d}.png"
         )
+        plt.close(fig2)
         if args.verbose:
             print(f"f2 ", end="", flush=True)
         build_rotated_plots(
-            fig1, axes1, res_dir['clip_thresh'], res_dir['subject_id'],
+            fig1,
+            axes1,
+            res_dir['clip_thresh'],
+            res_dir['subject_id'],
             middle_azimuth=args.azimuth_center,
             azimuth_range=args.azimuth_range,
+            camera_elevation=args.camera_elevation,
             work_dir=args.work_path,
+            leave_intermediates=args.leave_intermediates,
+            paint_debug_grids_on_slides=args.paint_debug_grids_on_slides,
             verbose=args.verbose,
         )
+        plt.close(fig1)
         one_clip_movie_file = Path(
             combine_plots_into_movie(
-                res_dir['subject_id'], res_dir['clip_thresh'], args.work_path,
-                remove_individual_slides=False, verbose=args.verbose
+                res_dir['subject_id'],
+                res_dir['clip_thresh'],
+                args.work_path,
+                leave_intermediates=args.leave_intermediates,
+                verbose=args.verbose
             )
         )
         movie_pieces.append(one_clip_movie_file)
 
         if args.verbose:
-            printc(f"movie '{one_clip_movie_file.name}' made "
-                   f"at '{one_clip_movie_file.parent}'",
-                   c='green')
+            printc(f"  movie '{one_clip_movie_file.name}' made "
+                   f"at '{one_clip_movie_file.parent}'", )
         # shutil.copy(movie_file,
         #             Path(res_dir['path']) / "masks" / movie_file.name)
         # subprocess.run("rm mask_3d_*.png", shell=True, cwd=str(work_dir))
