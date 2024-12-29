@@ -174,18 +174,20 @@ def calculate_sparsity(centroids, threshold=95):
                 break
 
 
-def calculate_axis_weights(centroids):
+def calculate_axis_weights(centroids, pet_img):
     """ How heavily weighted are the cluster masks along x, y, z axes?
+
+        :param centroids: List of centroids
+        :param pet_img: Nifti PET image for shape and affine, not data
     """
+
+    # All centroids were from the same image; which axis points inferiorly?
+    ax, direction = get_s_i_axis(pet_img.shape[:3], pet_img.affine)
 
     # Collapse axes of each centroid to determine how heavily a single
     # slice is represented by this cluster mask in each dimension
     for c in centroids:
-        img_shape = c.original_shape
-        img_affine = c.original_affine
-        ax, direction = get_s_i_axis(img_shape, img_affine)
-
-        # Figure out which slice is the lowest axial neck slice.
+        # Figure out the density of voxels in each slice, inf to sup
         mask = (reshape_labels_to_3d(c.labels, c.original_shape) == c.label)
         if ax == 2:
             # feature_name = 'k_density'
@@ -196,38 +198,25 @@ def calculate_axis_weights(centroids):
         else:  # ax == 0
             # feature_name = 'i_density'
             density = np.sum(np.sum(mask, axis=1), axis=1)
-
-        if direction > 0.0:
-            start, stop = 0.0, len(density)
-        else:
-            start, stop = len(density), 0.0
-
-        """
-        # labels already had +1, so they're 1-indexed
-        # We don't have the affine and are ignorant of real-world directions,
-        # so avoid world x,y,z and use array i,j,k
-        # Collapse i, leaving [j,k]
-        jk_sums_2d = np.sum(mask, axis=0)
-        # Collapse j, leaving only [k]
-        c.features['k_density'] = np.sum(jk_sums_2d, axis=0)
-        # Collapse k, leaving only [j]
-        c.features['j_density'] = np.sum(jk_sums_2d, axis=1)
-        # Collapse j, leaving [i, k]
-        ik_sums_2d = np.sum(mask, axis=1)
-        # Collapse k, leaving only [i]
-        c.features['i_density'] = np.sum(ik_sums_2d, axis=1)
-        """
+        ratios = density / np.sum(density)
 
         # Calculate a score to indicate the cluster is dominated by neck noise.
-        # These weights roughly add the proportion of voxels in the lowest 12 slices,
-        # and ignore everything else. So a score of 0.50 would indicate that about
-        # half the voxels are in the bottom 12 axial slices.
-        def custom_inverse_sigmoid(x):
-            return 1.0 - (1 / (1 + 3 ** (-1 * (x - 12)))) ** (1 / 2)
-        weights = custom_inverse_sigmoid(np.linspace(start, stop, len(density)))
-        ratios = density / np.sum(density)
-        # ratios = ratios - np.mean(ratios) * np.std(ratios)
-        c.features['neck_noise_score'] = np.sum(ratios * weights)
+        num_penalized_slices = 12
+        weights = np.ones(len(density)) * -1.0
+        leading_weights = [2.0 / (2**i) for i in range(num_penalized_slices)]
+        if direction > 0.0:
+            # start, stop = 0.0, len(density)
+            penalized_idx = list(range(num_penalized_slices))
+        else:
+            # start, stop = len(density), 0.0
+            penalized_idx = [(i + 1) * -1 for i in range(num_penalized_slices)]
+        weights[penalized_idx] = np.array(leading_weights)
+
+        # These weights add the proportion of voxels in the lowest slices,
+        # and penalize everything in head space. So a score of 1.0 would
+        # indicate very heavy influence of voxels in the bottom-most slice.
+        # A good cluster will probably have a negative score.
+        c.features['inf_weighted_score'] = np.sum(ratios * weights)
 
 
 def calculate_spatial_info(centroids, step, logger, num_cpus=-1):
@@ -735,9 +724,9 @@ def consider_alternate_clusters(
             match_best_str = "n/a"
             if 'matches_best' in c.features:
                 match_best_str = f"{c.features['matches_best']:0.1%}"
-            neck_noise_str = "n/a"
-            if 'neck_noise_score' in c.features:
-                neck_noise_str = f"{c.features['neck_noise_score']:0.2f}"
+            inf_weighted_score_str = "n/a"
+            if 'inf_weighted_score' in c.features:
+                inf_weighted_score_str = f"{c.features['inf_weighted_score']:0.2f}"
             reduced_str = "Δ" if c.source == "sparsity reduction" else ""
             html_table.append(
                 "<tr>"
@@ -746,7 +735,7 @@ def consider_alternate_clusters(
                 f"<td>{stability_str}</td>"
                 f"<td>{overlap_str}</td>"
                 f"<td>{match_best_str}</td>"
-                f"<td>{neck_noise_str}</td>"
+                f"<td>{inf_weighted_score_str}</td>"
                 f"<td>{c.sparsity}</td>"
                 f"<td>{c.voxel_count:,}</td>"
                 f"<td>{'*' if c.best_in_k else ''}"

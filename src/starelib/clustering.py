@@ -244,6 +244,17 @@ def post_process_clusters(
         logger=None
 ):
     """ After k-means, handle any additional processing before use.
+
+    :param centroids: A list of all centroid objects, vascular centroids
+        will be separated from the rest before expensive computations.
+    :param k_means_model_fits: results from the k-means processing
+    :param pet_4d_img: The 4D PET image,
+            may differ from the image in results due to cropping and resampling
+    :param results: The giant omni-object with project global data
+    :param step: Is this step 1 or step 2 clustering?
+    :param rpt_sect: The report section for writing lines
+    :param logger: A logging object for console and log output
+    :return: A list of centroids, may point to different centroids than inputs
     """
 
     # If we were asked not to post-process, just pass data right back.
@@ -340,8 +351,8 @@ def post_process_clusters(
     logger.info("Calculating centroid similarity and k-stability")
     sim_mat = build_similarity(vascular_centroids)
     calculate_k_stability(vascular_centroids, sim_mat)
-    logger.info("Calculating axis weights for detecting neck noise.")
-    calculate_axis_weights(vascular_centroids)
+    logger.info("Calculating axis weights for detecting inf_weighted_score.")
+    calculate_axis_weights(vascular_centroids, pet_4d_img)
 
     if (
             (step == 1) and
@@ -401,7 +412,8 @@ def load_or_calculate_clusters(
 
         :param results: Results object
         :param cluster_function: function that takes k and label as input and
-        :param source_4d_image: 4D PET activity image, may differ from i
+        :param source_4d_image: 4D PET activity image,
+            may differ from the image in results due to cropping and resampling
         :param ks: list of k values for running repeated k-means
         :param step: Which step in two-step k-means, 1 or 2
         :param report_section: Part of the report we can write to
