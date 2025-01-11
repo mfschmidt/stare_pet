@@ -75,6 +75,7 @@ def make_atlas_and_mask(
         cluster_atlas_data = image.resample_img(
             cluster_atlas_img, target_affine=resample_to.affine,
             interpolation='nearest', target_shape=resample_to.shape,
+            copy_header=True,
         ).get_fdata()
 
     # If requested, add back the cropped axial slices
@@ -387,12 +388,13 @@ def post_process_clusters(
     # If spatial information convinces us to abandon our original k-means
     # cluster selection, override it with a new one.
     # Pass all centroids so it can report the ratio of vascular/all
-    alt_cluster_html = consider_alternate_clusters(
-        centroids, k_means_model_fits, pet_4d_img,
-        verbose=results.args.verbose, logger=logger
-    )
-    for line in alt_cluster_html:
-        rpt_sect.add_line(line)
+    if results.args.consider_alternate_step_one_cluster:
+        alt_cluster_html = consider_alternate_clusters(
+            centroids, k_means_model_fits, pet_4d_img,
+            verbose=results.args.verbose, logger=logger
+        )
+        for line in alt_cluster_html:
+            rpt_sect.add_line(line)
 
     if results.args.debug:
         sim_mat.to_csv(results.args.debug_path / f"dice_step_{step}.csv")
@@ -579,6 +581,7 @@ def fake_centroid_from_mask(
             target_affine=basis_centroid.original_affine,
             interpolation='nearest',
             target_shape=basis_centroid.original_shape[:3],
+            copy_header=True,
         )
         print(f" |fc| Resampled mask to {_fake_3d_mask.shape} with "
               f"{np.sum(_fake_3d_mask):,} hot voxels.")
@@ -657,7 +660,10 @@ def resample_for_clustering(original_image, resample_string, logger=None):
             )
         else:
             return (
-                image.resample_img(original_image, target_affine=target_affine),
+                image.resample_img(
+                    original_image, target_affine=target_affine,
+                    copy_header=True,
+                ),
                 True,
             )
     else:
