@@ -76,14 +76,6 @@ def get_argument_parser():
         help="The irreversible PET tracer used, only 'FDG' is supported",
     )
     parser.add_argument(
-        "--override-step-1-cluster", type=Path, default=None,
-        help="A binary mask may be used in place of k-means clustering.",
-    )
-    parser.add_argument(
-        "--override-step-2-cluster", type=Path, default=None,
-        help="A binary mask may be used in place of k-means clustering.",
-    )
-    parser.add_argument(
         "-c", "--vasc-corr-pct", type=int, default=0,
         help="The vascular correction percentage, as an integer from 0 to 100",
     )
@@ -104,6 +96,14 @@ def get_argument_parser():
         help="How many iterations should the annealer be capped at?"
     )
     parser.add_argument(
+        "--override-step-1-cluster", type=Path, default=None,
+        help="A binary mask may be used in place of k-means clustering.",
+    )
+    parser.add_argument(
+        "--override-step-2-cluster", type=Path, default=None,
+        help="A binary mask may be used in place of k-means clustering.",
+    )
+    parser.add_argument(
         "--resample-for-clustering", type=str, default="",
         help="Down-sample the PET images for k-means clustering. "
              "'x2' down-samples by halving in each dimension. "
@@ -117,6 +117,13 @@ def get_argument_parser():
              "cluster. A threshold of 10 will remove up to 10%% of the voxels, "
              "from the smallest blobs, leaving the largest, most contiguous "
              "blobs, constituting at least 90%% of the voxels."
+    )
+    parser.add_argument(
+        "--consider-alternate-step-one-cluster", action="store_true",
+        help="Set this to True to cause STARE to assess the step one k-means "
+             "cluster, compare it to alternative clusters, and change its "
+             "selection if it finds a better option. Note that 'better' is "
+             "subject to many factors and may change version-to-version."
     )
     parser.add_argument(
         "--latest-usable-volume", type=int, default=-1,
