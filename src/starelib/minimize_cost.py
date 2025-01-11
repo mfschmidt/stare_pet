@@ -37,7 +37,7 @@ def cost_function(
         # just return a cost so high that this non-solution can't possibly be
         # selected as legitimate.
         # Reasonable solutions have costs below 0.010
-        return 1.0
+        return 999.0
 
     return cost
 
@@ -48,19 +48,24 @@ def worker(arg_tuple):
     # Provide a place for the callback to store intermediate annealing data
     global_annealer_data = []
 
-    def annealer_callback(x, f, context):
+    def annealer_callback(x, cur_cost, context):
         """ Monitor annealer progress and decide when to quit.
 
             :param x: best parameters so far
-            :param f: cost of result from the best parameters so far
+            :param cur_cost: cost of result from the best parameters so far
             :param context: why the callback was called
         """
 
         if len(global_annealer_data) > 0:
-            delta = global_annealer_data[-1].get('f', 0.000) - f
+            delta = global_annealer_data[-1].get('cur_cost', 0.000) - cur_cost
         else:
-            delta = f
-        data_dict = {"f": f, "delta": delta, "context": context}
+            delta = cur_cost
+        data_dict = {
+            "cur_cost": cur_cost,
+            "delta": delta,
+            "context": context,
+            "t": datetime.now(),
+        }
         for _, p in enumerate(x):
             data_dict[f"x{_ + 1:00d}"] = p
         global_annealer_data.append(data_dict)
@@ -218,8 +223,16 @@ def minimize_cost_function(results, x0=None):
         # fig, axes = plot_stare_tac_fits(optimization_result)
         # fig.savefig(out_path / f"fit_tac_{region.name}_via_sa.png")
 
+    pickle.dump(
+        mp_args_list,
+        open(results.args.debug_path / "sa_args_list.pickle", "wb")
+    )
     annealer_results = run_in_mp_queue(
         worker, mp_args_list, results.args.num_cpus, results.logger
+    )
+    pickle.dump(
+        annealer_results,
+        open(results.args.debug_path / "sa_results.pickle", "wb")
     )
 
     # Save the rate constants in an accessible csv format.
