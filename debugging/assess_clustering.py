@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-# assess_clipping_effect_on_clustering.py
+# assess_clustering.py
 
 import os
 import sys
 import argparse
 import re
 import shutil
+import glob
 import subprocess
 import numpy as np
 import pandas as pd
@@ -118,22 +119,45 @@ def validate_args(args):
     """ Ensure the environment will support the requested workflows. """
 
     errors = list()
-
-    # Accept subject id with or without the 'sub-'
-    if args.subject.startswith("sub-"):
-        setattr(args, "subject", args.subject[4:])
+    explanation_needed = False
+    explanation = ""
 
     # Ensure paths we need exist (input, output, work)
-    if (    Path(args.input_path).exists() and
-            Path(args.input_path).is_dir()
-    ):
-        if args.verbose:
-            printc(f"starting the search in '{args.input_path}'", c='green')
-    elif Path(args.input_path).is_file():
-        errors.append(f"The input-path '{args.input_path}' is a file. I can't "
-                      "search for subject directories within it.")
-    else:
-        errors.append(f"The input-path '{args.input_path}' doesn't exist.")
+    # If we get a wildcard, we may be running in a debugger;
+    # The shell didn't expand the paths, so glob it ourselves to check.
+    if len(args.subject_paths) == 1:
+        if "*" in args.subject_paths[0]:
+            alt_paths = list(glob.glob(args.subject_paths[0]))
+            if len(alt_paths) > 0:
+                setattr(args, 'subject_paths', [str(p) for p in alt_paths])
+    valid_subject_paths = list()
+    for subject_path in args.subject_paths:
+        if Path(subject_path).exists() and Path(subject_path).is_dir():
+            if args.verbose:
+                printc(f"found '{subject_path}'", c='green')
+                valid_subject_paths.append(Path(subject_path))
+        elif Path(subject_path).is_file():
+            errors.append(f"The subject_path '{subject_path}' is a file. "
+                          "I expect a directory containing STARE output..")
+        else:
+            errors.append(f"The subject_path '{subject_path}' doesn't exist.")
+            if "*" in subject_path:
+                explanation_needed = True
+                explanation = (
+                    "It appears you've used wildcards to select STARE output "
+                    "directories. This should have worked because your shell "
+                    "should have expanded them, and this script should have "
+                    "seen the expanded list of paths, not the wild cards.\n"
+                    "This error will happen if your expression with wildcards "
+                    "doesn't actually find any paths. Try doing an 'ls' of "
+                    "your expression to check. If you have quotation "
+                    "marks around the path, try removing them. Or if you're "
+                    "running from a debugger or IDE, it may not expand the "
+                    "wildcards the way a proper shell would."
+                )
+    if len(valid_subject_paths) > 0:
+        # Replace full list of strings with validated list of Paths
+        setattr(args, 'subject_paths', valid_subject_paths)
 
     if (    Path(args.output_path).exists() and
             Path(args.output_path).is_dir()
@@ -176,6 +200,8 @@ def validate_args(args):
     if len(errors) > 0:
         for error in errors:
             printc(error, c='red')
+        if explanation_needed:
+            printc(explanation, c='cyan')
         sys.exit(1)
 
     return args
@@ -186,25 +212,18 @@ def get_arguments():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Find already-completed STARE runs with different values of "
-            f"--clip-axial-slices for one subject. "
-            "Create 3D plots of each k-means cluster, 2D plots of "
-            "spatial statistics, and package them all into a video."
+            "Create 3D plots of step-1 and step-2 k-means clusters, "
+            "and 2D plots of spatial statistics for each STARE run "
+            "specified, and package them all into a single video."
         ),
     )
     parser.add_argument(
-        "subject",
+        "subject_paths", nargs="+",
         help=(
-            "The subject's ID, matching the STARE output directory names. "
-            "With or without 'sub-' work the same"
-        ),
-    )
-    parser.add_argument(
-        "--input-path",
-        default=".",
-        help=(
-            "Any path upstream of the STARE output directories. "
-            "This is the start point of a search, so the closer the better."
+            "One or more paths to complete Python STARE runs. A movie will be "
+            "created for each path, then they will all be concatenated in the "
+            "order they were given as arguments. If the --order-by argument "
+            "is used, these paths will be ordered by 'clip' and 'sr' instead."
         ),
     )
     parser.add_argument(
@@ -219,6 +238,16 @@ def get_arguments():
             "The output path for writing intermediate files, "
             "which will be deleted. This should be a fast, "
             "local SSD if possible."
+        ),
+    )
+    parser.add_argument(
+        "--order-by",
+        default=None, type=str,
+        help=(
+            "Provide either 'clip' or 'sr' to re-order the paths provided by "
+            "that property of the STARE run first, and the other property "
+            "second. You can test the ordering by using --dry-run and "
+            "--verbose to see the order before actually running anything."
         ),
     )
     parser.add_argument(
@@ -467,7 +496,9 @@ def build_initial_3d_figure(
     min_y, max_y = min(y0, y1), max(y0, y1)
     min_z, max_z = min(z0, z1), max(z0, z1)
 
-    _fig = plt.figure(figsize=(10, 9), layout='tight')
+    # This plot will need to fit into white space 960 px by 540 px
+    # But we oversize it so we can crop the excess white space later.
+    _fig = plt.figure(figsize=(10, 7), layout='tight')
     _axes = _fig.add_subplot(projection='3d')
 
     ls = LightSource(azdeg=225, altdeg=45.0)
@@ -578,7 +609,7 @@ def build_initial_3d_figure(
     return _fig, _axes
 
 
-def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
+def make_frame_with_stats(mask_3d_file, clip=0, sr=0, title="",
                           leave_intermediates=False, paint_debug_grids=False):
     """ Expand the size of an existing image, adding text
     """
@@ -594,18 +625,6 @@ def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
     title_size = 64
     subtitle_size = 48
     # text_size = 28  # Text wasn't used, but this is a good size to add some
-
-    # Open the existing image and paste it into the new larger background.
-    inset_image = Image.open(mask_3d_file)
-    inset_left = margin
-    inset_top = image.height - inset_image.height - margin
-    image.paste(inset_image, (inset_left, inset_top))
-    if paint_debug_grids:
-        drawer.rectangle(
-            (inset_left, inset_top,
-             inset_left + inset_image.width, inset_top + inset_image.height),
-            fill=None, outline='red'
-        )
 
     # Add stat text to the image; deprecated and replaced with an image
     """
@@ -626,15 +645,42 @@ def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
 
     # Add the stats plots to the image
     stat_image = Image.open(
-        Path(mask_3d_file).parent / f"stats_{clip_thresh:03d}.png"
+        Path(mask_3d_file).parent / f"stats_{clip:02d}_{sr:02d}.png"
     )
-    stat_left = image.width - stat_image.width - margin
-    stat_top = image.height - stat_image.height - margin
+    if (stat_image.width != 1920) or (stat_image.height != 1080):
+        print(f"ERROR: Stats image ({stat_image.width}x{stat_image.height})")
+    stat_left = 0  # image.width - stat_image.width - margin
+    stat_top = 0  # image.height - stat_image.height - margin
     image.paste(stat_image, (stat_left, stat_top))
     if paint_debug_grids:
         drawer.rectangle(
             (stat_left, stat_top,
              stat_left + stat_image.width, stat_top + stat_image.height),
+            fill=None, outline='red'
+        )
+
+    # Open the 3D image and paste it into the new larger background.
+    inset_image = Image.open(mask_3d_file)
+    # White space left and right of 3D image can overlap axes labels,
+    # so crop it just a bit. There's plenty of white space to give.
+    # It was plotted 1000x700, to fill a space 920x540,
+    # but the image only takes up about 600x500 in the center,
+    # depending on the rotation
+    horizontal_crop = int((1000 - 920) / 2)
+    vertical_crop = int((700 - 540) / 2)
+    inset_image = inset_image.crop(
+        (horizontal_crop,
+         vertical_crop,
+         inset_image.width - horizontal_crop,
+         inset_image.height - vertical_crop)
+    )
+    inset_left = 480 + horizontal_crop  # margin
+    inset_top = 180  # image.height - inset_image.height - margin
+    image.paste(inset_image, (inset_left, inset_top))
+    if paint_debug_grids:
+        drawer.rectangle(
+            (inset_left, inset_top,
+             inset_left + inset_image.width, inset_top + inset_image.height),
             fill=None, outline='red'
         )
 
@@ -652,7 +698,7 @@ def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
         drawer.rectangle((x, y, x + tw, y + title_size),
                          fill=None, outline='red')
 
-    subtitle_text = f"clip-{clip_thresh}"
+    subtitle_text = f"clip-{clip} sr-{sr}"
     subtitle_font = ImageFont.truetype(
         font_dir / 'Roboto-Medium.ttf', subtitle_size
     )
@@ -674,7 +720,7 @@ def make_frame_with_stats(mask_3d_file, clip_thresh=0, title="",
 
 
 def build_rotated_plots(
-        fig, axes, clip_threshold, subject_id,
+        fig, axes, clip, sr, subject_id,
         middle_azimuth=90, azimuth_range=30, camera_elevation=10,
         paint_debug_grids_on_slides=False,
         work_dir="/var/tmp", leave_intermediates=False, verbose=False
@@ -694,7 +740,7 @@ def build_rotated_plots(
         mask_file = Path(work_dir) / f"mask_3d_{azimuth:03d}.png"
         axes.view_init(azim=azimuth, elev=camera_elevation)
         fig.savefig(mask_file)
-        make_frame_with_stats(mask_file, clip_threshold,
+        make_frame_with_stats(mask_file, clip, sr,
                               title=f"Subject {subject_id}",
                               leave_intermediates=leave_intermediates,
                               paint_debug_grids=paint_debug_grids_on_slides)
@@ -715,12 +761,12 @@ def build_rotated_plots(
         print("", flush=True)
 
 
-def combine_plots_into_movie(subject_id, clip_thresh, working_dir,
+def combine_plots_into_movie(mp4_prefix, working_dir,
                              leave_intermediates=False, verbose=False):
     """ Find all png files in a directory, and combine them into a movie.
     """
 
-    movie_filename = f"sub-{subject_id}_clip-{clip_thresh:02d}_3d_mask.mp4"
+    movie_filename = f"{mp4_prefix}_3d_mask.mp4"
     ffmpeg_command = [
         "ffmpeg", "-y", "-framerate", "30", "-pattern_type", "glob",
         "-i", "'frame_*.png'", "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -753,66 +799,111 @@ def combine_plots_into_movie(subject_id, clip_thresh, working_dir,
     return Path(working_dir) / movie_filename
 
 
-def make_stats_plots(metadata, slices_clipped):
+def make_stats_plots(
+        metadata, run_data, verbose=False
+):
     """ Make a grid of plots describing metadata.
 
         This plot will be the full-size slide for each movie frame,
         leaving white space to be overlaid with the 3D plot.
     """
 
-    _fig = plt.figure(figsize=(8.5, 9), layout='tight')
-    gs = GridSpec(4, 2, height_ratios=[1, 1, 1, 2])
+    # Build a figure amenable to a 1080p (1920x1080) movie resolution
+    _fig = plt.figure(figsize=(19.2, 10.8), layout='tight')
+
+    gs = GridSpec(nrows=6, ncols=4)
+    #         0                 1                 2                 3
+    #   +---------------------------------------------------------------------+
+    # 0 |                                Title                                |
+    #   +---------------+ +---------------------------------+ +---------------+
+    # 1 |     blobs     | |                                 | |     blobs     |
+    #   +---------------+ |                                 | +---------------+
+    # 2 |     voxels    | |        3D rotating image        | |     voxels    |
+    #   +---------------+ |                                 | +---------------+
+    # 3 |  voxels/blob  | |                                 | |  voxels/blob  |
+    #   +---------------+ +---------------------------------+ +---------------+
+    # 4 | bottom weight | |                                 | | bottom weight |
+    #   +---------------+ |           TAC Peaks             | +---------------+
+    # 5                   |                                 |
+    #                     +---------------------------------+
 
     vasc_filter = metadata['feature_likely_vascular']
     step_filter = (metadata['step'] == 1)
     k_filter = (metadata['k'] > 15)
     best_filter = metadata['best_overall']
-    clip_filter = metadata['slices_clipped'] == slices_clipped
-    print(f"  make_stats_plots got slices_clipped={slices_clipped}; "
-          f"{len(metadata['slices_clipped'].unique())} unique values in data: "
-          f"[{', '.join([f'{v}' for v in metadata['slices_clipped'].unique()])}]; "
-          f"{len(metadata[clip_filter])} rows with {slices_clipped} clipped.")
+    run_filter = metadata['run'] == run_data['run']
+    # if run_data['clip'] is not None:
+    #     clip_filter = metadata['slices_clipped'] == run_data['clip']
+    #     clip_ticks = [0, 5, 10, 15, 20, 25, 30]
+    # else:
+    #     clip_filter = metadata['slices_clipped'] >= 0  # all True
+    #     clip_ticks = list()
+    # if run_data['sr'] is not None:
+    #     sr_filter = metadata['sr'] == run_data['sr']
+    #     sr_ticks = [0, 5, 10, 15, 20]
+    # else:
+    #     sr_filter = metadata['sr'] >= 0  # all True
+    #     sr_ticks = list()
+    # print(f"  make_stats_plots got slices_clipped={slices_clipped}; "
+    #       f"{len(metadata['slices_clipped'].unique())} unique values in data: "
+    #       f"[{', '.join([f'{v}' for v in metadata['slices_clipped'].unique()])}]; "
+    #       f"{len(metadata[clip_filter])} rows with {slices_clipped} clipped.")
 
-    clip_ticks = [0, 5, 10, 15, 20, 25, 30]
+    # Only handles clips OR sr, not both
+    x_var = "run"
+    # ticks = clip_ticks
+    # if sparsity_reduced is not None and slices_clipped is not None:
+    #     x_var = "sr"
+    #     ticks = sr_ticks
 
-    for row, y_var in [(0, "blob_count"), (1, "voxel_count"), (2, "voxels_per_blob"), ]:
-        ax = _fig.add_subplot(gs[row, 0])
+    for row, y_var, y_name in [
+            (0, "blob_count", "blobs"),
+            (1, "voxel_count", "voxels"),
+            (2, "voxels_per_blob", "voxels/blob"),
+            (3, "feature_inf_weighted_score", "bottom weight")
+    ]:
+        # These four plots land on rows 1-4, column 0
+        ax = _fig.add_subplot(gs[row + 1, 0])
         sns.stripplot(
             data=metadata[vasc_filter & step_filter & k_filter],
-            x='slices_clipped', y=y_var, color='gray', alpha=0.50,
+            x=x_var, y=y_var, color='gray', alpha=0.50,
             native_scale=True, ax=ax,
         )
         hi_filter = metadata[y_var] > 250000
         sns.scatterplot(
             data=metadata[vasc_filter & step_filter & k_filter & hi_filter],
-            x='slices_clipped', y=y_var, color='red', s=70, ax=ax,
+            x=x_var, y=y_var, color='red', s=70, ax=ax,
         )
         sns.scatterplot(
-            data=metadata[vasc_filter & step_filter & k_filter & best_filter & clip_filter],
-            x='slices_clipped', y=y_var, color='blue', s=100, ax=ax,
+            data=metadata[vasc_filter & step_filter & k_filter & best_filter & run_filter],
+            x=x_var, y=y_var, color='blue', s=100, ax=ax,
         )
-        ax.set_title(f"{y_var} in vascular clusters with k>15")
-        ax.set_xticks(clip_ticks)
-        ax.set_xticklabels([f"{t}" for t in clip_ticks])
+        ax.set_title(f"{y_name} (vasc clusters, k>15)")
+        ax.set_ylabel(y_name)
+        # ax.set_xticks(ticks)
+        # ax.set_xticklabels([f"{t}" for t in ticks])
         if row < 2:
             ax.set_xlabel("")
 
-        ax = _fig.add_subplot(gs[row, 1])
+        # These four plots land on rows 1-4, column 3
+        ax = _fig.add_subplot(gs[row + 1, 3])
         sns.scatterplot(
             data=metadata[vasc_filter & step_filter & k_filter & best_filter],
-            x='slices_clipped', y=y_var, color='black', s=50, ax=ax,
+            x=x_var, y=y_var, color='black', s=50, ax=ax,
         )
         sns.scatterplot(
-            data=metadata[vasc_filter & step_filter & k_filter & best_filter & clip_filter],
-            x='slices_clipped', y=y_var, color='blue', s=150, ax=ax,
+            data=metadata[vasc_filter & step_filter & k_filter & best_filter & run_filter],
+            x=x_var, y=y_var, color='blue', s=150, ax=ax,
         )
-        ax.set_title(f"{y_var} in selected best clusters")
-        ax.set_xticks(clip_ticks)
-        ax.set_xticklabels([f"{t}" for t in clip_ticks])
+        ax.set_title(f"{y_name} (best clusters)")
+        ax.set_ylabel(y_name)
+        # ax.set_xticks(ticks)
+        # ax.set_xticklabels([f"{t}" for t in ticks])
         if row < 2:
             ax.set_xlabel("")
 
-    ax = _fig.add_subplot(gs[3, :])
+    # This TAC-like plot is larger, landing on the bottom, centered
+    ax = _fig.add_subplot(gs[4:6, 1:3])
     sns.scatterplot(
         data=metadata[vasc_filter & step_filter & k_filter],
         x='peak_index', y='peak_value', color='gray', alpha=0.50, ax=ax,
@@ -827,7 +918,7 @@ def make_stats_plots(metadata, slices_clipped):
         x='peak_index', y='peak_value', color='red', s=200, ax=ax,
     )
     sns.scatterplot(
-        data=metadata[vasc_filter & step_filter & k_filter & best_filter & clip_filter],
+        data=metadata[vasc_filter & step_filter & k_filter & best_filter & run_filter],
         x='peak_index', y='peak_value', color='blue', s=150, ax=ax,
     )
     max_x = metadata['peak_index'].max() + 1
@@ -841,16 +932,21 @@ def make_stats_plots(metadata, slices_clipped):
 def find_clipping_threshold(stare_out_path):
     """ Look in the log file to determine how many slices were clipped.
     """
-    log_files = sorted(stare_out_path.glob("stare_pet_*.log"))
+    log_files = sorted(stare_out_path.glob("stare_pet_*.log"), reverse=True)
     if len(log_files) == 0:
         print("no log file found")
         return 0
     else:
-        with open(log_files[-1], "r") as f:
-            for line in f:
-                match = re.search(r".*--axial-slices-to-clip[\s]+([0-9]+).*", line)
-                if match:
-                    return int(match.group(1))
+        for log_file in log_files:
+            print(f"Looking for clipping value in {log_file.parent.name} / {log_file.name}")
+            with open(log_file, "r") as f:
+                for line in f:
+                    match = re.search(r".*--axial-slices-to-clip[\s]+([0-9]+).*", line)
+                    if match:
+                        print(f"  found it: {match.groups}")
+                        return int(match.group(1))
+    print(f"  never found it")
+    return 0
 
 
 def write_fsl_script(img_path, any_stare_output_path):
@@ -880,28 +976,42 @@ def write_fsl_script(img_path, any_stare_output_path):
     return script_file
 
 
-def gather_subject_directories(starting_path, subject_id):
+def gather_subject_directories(subject_dirs, order_by=None):
     """ Collect paths for clipped clustering runs of one subject, in clip order
     """
 
-    # TODO: Make this more flexible, it's dependent on my strange directories.
-    # TODO: Dedupe somehow, I only want one per clip. The 'si' thing is brittle
+    nosr_pattern = re.compile(r"_nosr")
+    sr_pattern = re.compile(r"_sr-([0-9]+)")
+    path_dicts = list()
+    for sop in subject_dirs:
+        sr = None
+        if re.search(nosr_pattern, str(sop)):
+            sr = 0
+        else:
+            match = re.search(sr_pattern, str(sop))
+            if match is not None:
+                sr = int(match.groups()[0])
+        clip_threshold = int(sop.parent.name.split("-")[-1])
+        path_dicts.append({
+            'path': sop,
+            'clip_subdir': sop.parent.name,
+            'subject_id': sop.name,
+            'output_dir': sop.name,
+            'clip': clip_threshold,  # find_clipping_threshold(sop),
+            'sr': sr,
+            'run': f"{clip_threshold}(-{sr}%)",
+        })
 
-    stare_paths = list()
-    for sop in Path(starting_path).glob(f"clusters_nosr_0103*/*{subject_id}"):
-        if (
-                (sop.name in [subject_id, f"sub-{subject_id}"]) and
-                # ("si" not in sop.parent.name) and
-                ("so" not in sop.parent.name)
-        ):
-                stare_paths.append({
-                    'path': sop,
-                    'clip_subdir': sop.parent.name,
-                    'subject_id': sop.name,
-                    'clip_thresh': find_clipping_threshold(sop),
-                })
+    if order_by == "sr":
+        return sorted(path_dicts, key=lambda x: (x['sr'], x['clip']))
+    elif order_by == "clip":
+        return sorted(path_dicts, key=lambda x: (x['clip'], x['sr']))
+    elif order_by is not None:
+        printc(f"I can only sort by 'clip' or 'sr', not '{order_by}', "
+               f"so the paths will remain in their original order.",
+               'red')
 
-    return sorted(stare_paths, key=lambda x: x['clip_thresh'])
+    return path_dicts
 
 
 def main():
@@ -911,16 +1021,27 @@ def main():
 
     # Find the directories we'd like to include in our assessment.
     stare_result_dirs = gather_subject_directories(
-        args.input_path, args.subject
+        args.subject_paths, args.order_by
     )
     if args.verbose:
-        printc("The STARE runs found, in clip- order of presentation:")
+        if args.order_by is None:
+            order_str = ""
+        else:
+            order_str = f", in {args.order_by}- order"
+        printc(f"The STARE runs found{order_str}:")
         for res_dir in stare_result_dirs:
             print(f" - {res_dir['path']}")
 
     # Clear any existing full movies or lists of movie parts
-    vid_list_file = Path(args.work_path) / f"sub-{args.subject}_vids.txt"
-    movie_file = Path(args.work_path) / f"sub-{args.subject}.mp4"
+    subjects = set([d['subject_id'] for d in stare_result_dirs])
+    if len(subjects) == 1:
+        movie_subject = f"sub-{subjects.pop()}"
+    elif len(subjects) > 1:
+        movie_subject = "multisubject"
+    else:
+        movie_subject = "no_subs_prob_broken"
+    vid_list_file = Path(args.work_path) / f"{movie_subject}_vids.txt"
+    movie_file = Path(args.work_path) / f"{movie_subject}.mp4"
 
     if args.dry_run:
         if movie_file.exists():
@@ -940,7 +1061,9 @@ def main():
     movie_file.unlink(missing_ok=True)
     movie_pieces = list()
 
-    # On the first pass, just collect the blob metadata.
+    # -------------------------------------------------------------------------
+    # 0. Gather metadata (don't actually _DO_ anything)
+    # -------------------------------------------------------------------------
     metadata_dataframes = list()
     for res_dir in stare_result_dirs:
         if args.force:
@@ -954,23 +1077,32 @@ def main():
             )
             if metadata_file.exists():
                 df = pd.read_csv(metadata_file)
-                df['slices_clipped'] = res_dir['clip_thresh']
+                df['slices_clipped'] = res_dir['clip']
+                df['sr'] = res_dir['sr']
+                df['run'] = res_dir['run']
                 metadata_dataframes.append(df)
             else:
-                printc(f"skipping {res_dir['subject_id']} step {step} "
+                printc(f"skipping {res_dir['output_dir']} step {step} "
                        "because it doesn't exist.", c='yellow')
     blob_metadata = pd.concat(metadata_dataframes)
     if args.verbose:
         print(f"Built {blob_metadata.shape}-shaped metadata.")
 
+    # -------------------------------------------------------------------------
+    # 1. For each run found, build everything
+    # -------------------------------------------------------------------------
     # On the second pass, build 3D plots, 2D plots, and annotations.
     for i, res_dir in enumerate(stare_result_dirs):
         if args.verbose:
             printc(f"{i + 1:02d}/{len(stare_result_dirs):02d}. "
                    f"sub-{res_dir['subject_id']} "
                    f"in subdir '{res_dir['clip_subdir']}' "
-                   f"clip-{res_dir['clip_thresh']:03d}",
+                   f"clip-{res_dir['clip']:02d} "
+                   f"sr-{res_dir['sr']:02d}",
                    c="cyan")
+        # ---------------------------------------------------------------------
+        # 1 A. Make 3D meshes and render them in a 3D figure.
+        # ---------------------------------------------------------------------
         # If PCA was requested, masks must be created then made into meshes
         pca_0_mesh, pca_1_mesh = None, None
         if args.include_pca:
@@ -992,7 +1124,7 @@ def main():
         )
         if args.verbose:
             print(f"m2 ", end="", flush=True)
-        clip_mesh = make_clip_mesh(res_dir['path'], res_dir['clip_thresh'])
+        clip_mesh = make_clip_mesh(res_dir['path'], res_dir['clip'])
         if args.verbose:
             print(f"mC ", end="", flush=True)
 
@@ -1007,19 +1139,27 @@ def main():
         )
         if args.verbose:
             print(f"f1 ", end="", flush=True)
-        fig2 = make_stats_plots(
-            blob_metadata, slices_clipped=res_dir['clip_thresh']
-        )
+
+        # ---------------------------------------------------------------------
+        # 1 B. Build statistical plots, which act as backgrounds for each frame
+        # ---------------------------------------------------------------------
+        fig2 = make_stats_plots(blob_metadata, res_dir)
         fig2.savefig(
-            Path(args.work_path) / f"stats_{res_dir['clip_thresh']:03d}.png"
+            Path(args.work_path) /
+            f"stats_{res_dir['clip']:02d}_{res_dir['sr']:02d}.png"
         )
         plt.close(fig2)
         if args.verbose:
             print(f"f2 ", end="", flush=True)
+
+        # ---------------------------------------------------------------------
+        # 1 C. With the 3D plot, move the camera around, rendering each frame
+        # ---------------------------------------------------------------------
         build_rotated_plots(
             fig1,
             axes1,
-            res_dir['clip_thresh'],
+            res_dir['clip'],
+            res_dir['sr'],
             res_dir['subject_id'],
             middle_azimuth=args.azimuth_center,
             azimuth_range=args.azimuth_range,
@@ -1029,11 +1169,14 @@ def main():
             paint_debug_grids_on_slides=args.paint_debug_grids_on_slides,
             verbose=args.verbose,
         )
+
+        # ---------------------------------------------------------------------
+        # 1 D. Build each frame, drawing the 3D image onto the stats background
+        # ---------------------------------------------------------------------
         plt.close(fig1)
         one_clip_movie_file = Path(
             combine_plots_into_movie(
-                res_dir['subject_id'],
-                res_dir['clip_thresh'],
+                f"sub-{res_dir['subject_id']}_clip-{res_dir['clip']}_sr-{res_dir['sr']}",
                 args.work_path,
                 leave_intermediates=args.leave_intermediates,
                 verbose=args.verbose
@@ -1048,6 +1191,9 @@ def main():
         #             Path(res_dir['path']) / "masks" / movie_file.name)
         # subprocess.run("rm mask_3d_*.png", shell=True, cwd=str(work_dir))
 
+    # -------------------------------------------------------------------------
+    # 2. Collect each frame and concatenate them into an mp4 movie.
+    # -------------------------------------------------------------------------
     # Make a list of movie parts for ffmpeg to concatenate.
     for movie_piece in movie_pieces:
         # print(f"copying {movie_piece.name} to {args.work_path}/")
