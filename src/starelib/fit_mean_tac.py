@@ -154,7 +154,7 @@ def fit_vascular_mean_tac(results):
         ) as f:
             pickle.dump(successes, f)
 
-    if successes is None:
+    if ((successes is None) or (len(successes) == 0)):
         logger.error("No fits were found for PVC data. "
                      "STARE cannot continue. "
                      "The mostly likely problem is a bad cluster selection?")
