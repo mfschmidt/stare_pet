@@ -552,15 +552,16 @@ def build_initial_3d_figure(
         _axes.add_collection3d(mesh_step_2)
 
     # Create, color, and light the step 2 mesh
-    clip_alpha = 0.2
-    color_clip = np.array((55.0 / 255.0, 54.0 / 255.0, 1.0, clip_alpha))
-    mesh_clipping_cube = mplot3d.art3d.Poly3DCollection(
-        clip_mesh.vectors,
-        alpha=clip_alpha, shade=False,
-        facecolors=color_clip, edgecolors=color_clip,
-        lightsource=ls
-    )
-    _axes.add_collection3d(mesh_clipping_cube)
+    if clip_mesh is not None:
+        clip_alpha = 0.2
+        color_clip = np.array((55.0 / 255.0, 54.0 / 255.0, 1.0, clip_alpha))
+        mesh_clipping_cube = mplot3d.art3d.Poly3DCollection(
+            clip_mesh.vectors,
+            alpha=clip_alpha, shade=False,
+            facecolors=color_clip, edgecolors=color_clip,
+            lightsource=ls
+        )
+        _axes.add_collection3d(mesh_clipping_cube)
 
     """
     x_coords = np.concat([
@@ -829,7 +830,8 @@ def make_stats_plots(
 
     vasc_filter = metadata['feature_likely_vascular']
     step_filter = (metadata['step'] == 1)
-    k_filter = (metadata['k'] > 15)
+    # We use k=1 sometimes when overriding the cluster with a custom mask.
+    k_filter = ((metadata['k'] > 15) | (metadata['k'] == 1))
     best_filter = metadata['best_overall']
     run_filter = metadata['run'] == run_data['run']
     # if run_data['clip'] is not None:
@@ -862,6 +864,10 @@ def make_stats_plots(
             (2, "voxels_per_blob", "voxels/blob"),
             (3, "feature_inf_weighted_score", "bottom weight")
     ]:
+        if y_var not in metadata.columns:
+            if verbose:
+                print(f"  excluding {y_var} from stats plot; not in metadata")
+            continue
         # These four plots land on rows 1-4, column 0
         ax = _fig.add_subplot(gs[row + 1, 0])
         sns.stripplot(
@@ -949,57 +955,37 @@ def find_clipping_threshold(stare_out_path):
     return 0
 
 
-def write_fsl_script(img_path, any_stare_output_path):
-    """ Write an fsl script to view a background and provided image.
-    """
-
-    # Find an averaged PET for background
-    bg_paths = list(Path(any_stare_output_path).glob("sub-*_orig_mean.nii.gz"))
-    if len(bg_paths) == 0:
-        bg_paths = list(Path(any_stare_output_path).glob("sub-*_mean.nii.gz"))
-    if len(bg_paths) == 0:
-        bg_path = None
-    else:
-        bg_path = str(bg_paths[0])
-    img_path = str(img_path)
-
-    # Write a script to open images in fsleyes
-    script_file = str(Path(img_path).parent / "view_in_fsl.sh")
-    with open(script_file, "w") as f:
-        f.write("#!/bin/bash\n\n")
-        f.write("fsleyes \\\n")
-        if bg_path is not None:
-            f.write(f"  {bg_path} --name \"Average PET\" --overlayType volume \\\n")
-        f.write(f"  {img_path} --name \"Clusters\" --overlayType label \\\n")
-    os.chmod(script_file, 0o755)
-
-    return script_file
-
-
 def gather_subject_directories(subject_dirs, order_by=None):
     """ Collect paths for clipped clustering runs of one subject, in clip order
     """
 
     nosr_pattern = re.compile(r"_nosr")
-    sr_pattern = re.compile(r"_sr-([0-9]+)")
+    sr_pattern = re.compile(r"sr-([0-9]+)")
+    clip_pattern = re.compile(r"clip-([0-9]+)")
+    or_pattern = re.compile(r"or-([a-z0-9]+)")
     path_dicts = list()
     for sop in subject_dirs:
-        sr = None
-        if re.search(nosr_pattern, str(sop)):
+        sr = 0  # If no SR was specified, sparsity reduction was not applied
+        clip = 0  # If no clip was specified, nothing was clipped
+        override = ""  # If no override was specified, it was not applied
+        if nosr_pattern.search(str(sop)):
             sr = 0
-        else:
-            match = re.search(sr_pattern, str(sop))
-            if match is not None:
-                sr = int(match.groups()[0])
-        clip_threshold = int(sop.parent.name.split("-")[-1])
+        elif sr_pattern.search(str(sop)):
+            sr = int(sr_pattern.search(str(sop)).group(1))
+        if clip_pattern.search(str(sop)):
+            clip = int(clip_pattern.search(str(sop)).group(1))
+        if or_pattern.search(str(sop)):
+            override = or_pattern.search(str(sop)).group(1)
+
         path_dicts.append({
             'path': sop,
             'clip_subdir': sop.parent.name,
             'subject_id': sop.name,
             'output_dir': sop.name,
-            'clip': clip_threshold,  # find_clipping_threshold(sop),
+            'clip': clip,
             'sr': sr,
-            'run': f"{clip_threshold}(-{sr}%)",
+            'override': override,
+            'run': f"{clip}(-{sr}%)",
         })
 
     if order_by == "sr":
