@@ -15,12 +15,12 @@ from .util import StareVolume, image_in_millicuries,\
 
 
 def get_tsv_data(
-        input_path, subject_id, contents, tracer,
+        subject_dir, subject_id, contents, tracer,
         logger=None
 ):
     """ Find a tsv/txt file and read its data
 
-    :param input_path: path to find subjects
+    :param subject_dir: input_path / sub-subject_id
     :param subject_id: name of subject folder
     :param str contents: what kind of data is in the file
     :param str tracer: what tracer was injected
@@ -36,28 +36,39 @@ def get_tsv_data(
     sep = '\t'
     names = None
     file_used = None
-    subject_dir = Path(input_path) / subject_id
+
     if contents.lower() == "tacs":
         picnic_tacs = list(subject_dir.glob(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
-        old_school_tacs = [subject_dir / "raw" / f"{subject_id}.tacs.tsv",
+        old_school_tacs = [subject_dir / "raw" / f"sub-{subject_id}.tacs.tsv",
+                           subject_dir / "raw" / f"{subject_id}.tacs.tsv",
+                           subject_dir / f"sub-{subject_id}.TACs",
                            subject_dir / f"{subject_id}.TACs",
+                           subject_dir / f"sub-{subject_id}_FS_TACs.csv",
                            subject_dir / f"{subject_id}_FS_TACs.csv", ]
         alternate_tacs = [subject_dir / "tacs.txt",
-                          subject_dir / "BS_Stats" / "coreg" / subject_id, ]
+                          subject_dir / "BS_Stats" / "coreg" / subject_id,
+                          subject_dir / f"sub-{subject_id}_tacs.tsv",
+                          subject_dir / f"{subject_id}_tacs.tsv", ]
         possible_files = picnic_tacs + old_school_tacs + alternate_tacs
     elif contents.lower() == "plasma":
-        old_school_plasma = [subject_dir / "raw" / f"{subject_id}.plasma.tsv",
+        old_school_plasma = [subject_dir / "raw" / f"sub-{subject_id}.plasma.tsv",
+                             subject_dir / "raw" / f"{subject_id}.plasma.tsv",
+                             subject_dir / f"sub-{subject_id}plasma.txt",
                              subject_dir / f"{subject_id}plasma.txt", ]
-        alternate_plasma = [subject_dir / "plasma.txt", ]
+        alternate_plasma = [subject_dir / "plasma.txt",
+                            subject_dir / f"{subject_id}_plasma.tsv",
+                            subject_dir / f"sub-{subject_id}_plasma.tsv",]
         possible_files = old_school_plasma + alternate_plasma
     elif contents.lower() in ["midtimes", "mid-times", "mid_times", ]:
         picnic_midtimes = list(subject_dir.glob(
             f"ses-{tracer.lower()}*_tacs/out_file/wmparc_reoriented_tacs.tsv"
         ))
         old_school_times = [
+            subject_dir / "raw" / f"sub-{subject_id}.raw.midtime.txt",
             subject_dir / "raw" / f"{subject_id}.raw.midtime.txt",
+            subject_dir / f"sub-{subject_id}.raw.midtime.txt",
             subject_dir / f"{subject_id}.raw.midtime.txt",
         ]
         alternate_times = [
@@ -134,7 +145,7 @@ def get_tacs(results):
     # Else, find one in the input_path
     else:
         results.original_tacs, results.source_tacs_path = get_tsv_data(
-            results.args.input_path, results.args.subject, "tacs",
+            results.args.subject_path, results.args.subject, "tacs",
             results.args.tracer, results.logger
         )
 
@@ -163,10 +174,10 @@ def get_tacs(results):
     return results
 
 
-def get_plasma(input_path, subject_id, tracer, logger=None):
+def get_plasma(subject_dir, subject_id, tracer, logger=None):
     """ Find a plasma file and read its data
 
-    :param input_path: path to find subjects
+    :param subject_dir: path to find subjects
     :param subject_id: name of subject folder
     :param str tracer: what tracer was injected
     :param logger: where to send messages
@@ -176,14 +187,25 @@ def get_plasma(input_path, subject_id, tracer, logger=None):
     logger = logging.getLogger("STARE") if logger is None else logger
 
     plasma_data, plasma_file = get_tsv_data(
-        input_path, subject_id, "plasma", tracer, logger
+        subject_dir, subject_id, "plasma", tracer, logger
     )
     if plasma_data is None:
         return None, plasma_file
-    if 'PlasRawY' in plasma_data.columns and 'PlasRawT' in plasma_data.columns:
+    if (    ('PlasRawY' in plasma_data.columns) and
+            ('PlasRawT' in plasma_data.columns)
+    ):
         return TimeActivityCurve(
             activity=plasma_data['PlasRawY'].values.astype(float),
             timepoints=plasma_data['PlasRawT'].values.astype(float),
+            source="plasma",
+            name="plasma",
+        ), plasma_file
+    elif (    ('time' in plasma_data.columns) and
+              ('plasma_radioactivity' in plasma_data.columns)
+    ):
+        return TimeActivityCurve(
+            activity=plasma_data['plasma_radioactivity'].values.astype(float),
+            timepoints=plasma_data['time'].values.astype(float),
             source="plasma",
             name="plasma",
         ), plasma_file
@@ -202,7 +224,7 @@ def get_mid_times(results):
     if results.original_mid_times is None:
         # We need to find the mid_times file
         local_mid_times, results.source_mid_times_path = get_tsv_data(
-            results.args.input_path, results.args.subject, "midtimes",
+            results.args.subject_path, results.args.subject, "midtimes",
             results.args.tracer, results.logger
         )
     else:
@@ -273,6 +295,8 @@ def get_individual_volumes(
 
     volumes = []
     image_dir = Path(input_path) / subject_id / "moco"
+    if not image_dir.exists():
+        image_dir = Path(input_path) / f"sub-{subject_id}" / "moco"
     orig_dir = Path(output_path) / "orig"
     orig_dir.mkdir(parents=True, exist_ok=True)
     for pattern in ["{subject}.*.hdr", "*.nii", "*.nii.gz", ]:
@@ -393,8 +417,12 @@ def gather_data(results):
                 ("--" + arg.replace("_", "-")) not in sys.argv
         ):
             if "path" in arg:
+                if arg == "subject_path":
+                    verb_phrase = "reading from"
+                else:
+                    verb_phrase = "writing to"
                 calculated_paths.append(
-                    f"{arg} writing to '{getattr(results.args, arg)}'"
+                    f"{arg} {verb_phrase} '{getattr(results.args, arg)}'"
                 )
             else:
                 implemented_defaults.append(
@@ -432,6 +460,11 @@ def gather_data(results):
     # Assume everything's good until we encounter a problem.
     ok_to_run = True
     args = results.args
+
+    # Determine subject_dir for reading input
+    subject_dir = Path(args.input_path) / args.subject
+    if not subject_dir.is_dir():
+        subject_dir = Path(args.input_path) / f"sub-{args.subject}"
 
     # Read PET TAC data
     results = get_tacs(results)
@@ -472,7 +505,7 @@ def gather_data(results):
 
     # Get plasma data if it's available, but this is not required.
     plasma_tac, plasma_file = get_plasma(
-        args.input_path, args.subject, args.tracer, logger=logger
+        args.subject_path, args.subject, args.tracer, logger=logger
     )
     if plasma_tac is None:
         logger.warning("Could not find any plasma TACs.")
@@ -490,6 +523,7 @@ def gather_data(results):
     results.source_plasma_tac_file = plasma_file
 
     # Load PET images
+    logger.debug("Looking for motion-corrected PET data...")
     combined_image, volumes = None, None
 
     # The first preference is if there is already a cached 4D image.
@@ -505,10 +539,11 @@ def gather_data(results):
 
     # The next preference is a 4D image from the PICNIC pipeline.
     picnic_img_file = Path("/NOT_A_FILE.ext")
-    for img in (args.input_path / args.subject).glob(
-        "ses-{t}*_moco/out_file/ses-{t}*.nii.gz".format(t=args.tracer.lower())
+    for img in subject_dir.glob(
+        f"sub-{results.args.subject}_ses-*_*.nii.gz"
     ):
         # There should only be one file (or none)
+        # It ought to be a *_moco.nii.gz or *_coreg.nii.gz
         picnic_img_file = img
     if combined_image is None and picnic_img_file.exists():
         combined_image, volumes = get_4D_data(
@@ -523,7 +558,7 @@ def gather_data(results):
     # Future data will be BIDS-compliant.
     # We need to support all of these, and also allow for PVC correction
     # of individual volumes later.
-    moco_path = Path(args.input_path) / args.subject / "moco"
+    moco_path = subject_dir / "moco"
     moco_images = list(moco_path.glob("*.hdr"))
     moco_images.extend(list(moco_path.glob("*.nii")))
     moco_images.extend(list(moco_path.glob("*.nii.gz")))
