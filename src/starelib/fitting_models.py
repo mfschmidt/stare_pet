@@ -156,7 +156,7 @@ def randomize_stacked_exponential_parameters(n=6, init_params=None):
 
 
 def find_curve_fits(
-        f, x, y, sigmas=None, success_limit=10, failure_limit=8192
+        f, x, y, sigmas=None, success_limit=10, failure_limit=4096
 ):
     """ Find several options for fitting data to our model.
 
@@ -205,20 +205,20 @@ def find_curve_fits(
             # the curve and can be dismissed as failure.
             if np.isnan(retval[0]).any() or np.isnan(retval[1]).any():
                 failures.append(Failure(failure_codes.CONVERGED_TO_NAN, p0))
-                logger.debug("a curve fit converged, but converged to NaN, "
-                             f"failure {len(failures)} for this model, "
-                             f"{len(successes)} successes.")
+                # logger.debug("a curve fit converged, but converged to NaN, "
+                #              f"failure {len(failures)} for this model, "
+                #              f"{len(successes)} successes.")
             elif np.isinf(retval[0]).any() or np.isinf(retval[1]).any():
                 failures.append(Failure(failure_codes.CONVERGED_TO_INF, p0))
-                logger.debug("a curve fit converged, but converged to infinity,"
-                             f" failure {len(failures)} for this model, "
-                             f"{len(successes)} successes.")
+                # logger.debug("a curve fit converged, but converged to infinity,"
+                #              f" failure {len(failures)} for this model, "
+                #              f"{len(successes)} successes.")
             elif weighted_error > 10.0:
                 failures.append(Failure(failure_codes.ERROR_TOO_HIGH, p0))
-                logger.debug("a curve fit converged, but weighted error of "
-                             f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
-                             f"failure {len(failures)} for this model, "
-                             f"{len(successes)} successes.")
+                # logger.debug("a curve fit converged, but weighted error of "
+                #              f"{weighted_error:0.2f} (rms {rms:0.2f}) is high, "
+                #              f"failure {len(failures)} for this model, "
+                #              f"{len(successes)} successes.")
             else:
                 successes.append({
                     "parameters": fit_parameters,
@@ -231,28 +231,28 @@ def find_curve_fits(
                 })
         except RuntimeError as e:
             failures.append(Failure(failure_codes.RUNTIME_ERROR, p0))
-            logger.debug(f"a curve fit raised RuntimeError '{e}', "
-                         f"failure {len(failures)} for this model, "
-                         f"{len(successes)} successes.")
+            # logger.debug(f"a curve fit raised RuntimeError '{e}', "
+            #              f"failure {len(failures)} for this model, "
+            #              f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except OptimizeWarning as e:
             failures.append(Failure(failure_codes.OPTIMIZE_WARNING, p0))
-            logger.debug(f"a curve fit raised an optimize warning '{e}', "
-                         f"failure {len(failures)} for this model, "
-                         f"{len(successes)} successes.")
+            # logger.debug(f"a curve fit raised an optimize warning '{e}', "
+            #              f"failure {len(failures)} for this model, "
+            #              f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
         except RuntimeWarning:
             failures.append(Failure(failure_codes.RUNTIME_WARNING, p0))
-            logger.debug("a curve fit raised a runtime warning, "
-                         f"failure {len(failures)} for this model, "
-                         f"{len(successes)} successes.")
+            # logger.debug("a curve fit raised a runtime warning, "
+            #              f"failure {len(failures)} for this model, "
+            #              f"{len(successes)} successes.")
             # logger.debug("x: [" + ",".join([f"{_}:0.1f" for _ in x]) + "]")
             # logger.debug("y: [" + ",".join([f"{_}:0.1f" for _ in y]) + "]")
     warnings.resetwarnings()
     warnings.filterwarnings("ignore")
-    logger.info(f"Curve fitting summary: Seeking {success_limit} fits, "
+    logger.debug(f"Curve fitting summary: Seeking {success_limit} fits, "
                 f"and tolerating {failure_limit} failures before quitting: "
                 f"{len(successes)} converged and {len(failures)} failed to.")
 
