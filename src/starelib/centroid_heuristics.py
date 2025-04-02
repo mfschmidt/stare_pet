@@ -3,6 +3,10 @@ import logging
 from datetime import datetime
 from sklearn.cluster import KMeans
 import pandas as pd
+import nilearn as nil
+from nibabel import affines
+from scipy.ndimage import center_of_mass
+from scipy.spatial import distance
 
 from .centroid import Centroid
 from .mp_queues import run_in_mp_queue
@@ -50,9 +54,11 @@ def likely_noise(c):
     :return: True if noise, False otherwise
     """
 
-    # If activity at any point after the first one is negative,
-    # this voxel is likely noise
-    return np.any(c.activity[1:] < 0)
+    # If activity at any point after the first two are negative,
+    # this voxel is likely noise. This used to be after the first one,
+    # but we found a subject with a negative value at the second time
+    # point and a perfectly good TAC otherwise.
+    return np.any(c.activity[2:] < 0.0)
 
 
 def likely_vascular(c):
@@ -81,7 +87,7 @@ def likely_background(c):
     # If this centroid is larger than 1/5 of the image,
     # it is much more likely to be non-brain background than vascular.
     if isinstance(c, Centroid):
-        print(f"C {c.label}/{c.k} has {c.voxel_count:,}/{c.voxels_in_img:,} voxels.")
+        # print(f"C {c.label}/{c.k} has {c.voxel_count:,}/{c.voxels_in_img:,} voxels.")
         return c.voxel_count > c.voxels_in_img / 5.0
     else:
         return False
@@ -174,49 +180,49 @@ def calculate_sparsity(centroids, threshold=95):
                 break
 
 
-def calculate_axis_weights(centroids, pet_img):
+def calculate_axis_weights(mask, pet_img):
     """ How heavily weighted are the cluster masks along x, y, z axes?
 
-        :param centroids: List of centroids
+        :param mask: A 3D-shaped cluster mask
         :param pet_img: Nifti PET image for shape and affine, not data
     """
 
     # All centroids were from the same image; which axis points inferiorly?
     ax, direction = get_s_i_axis(pet_img.shape[:3], pet_img.affine)
 
-    # Collapse axes of each centroid to determine how heavily a single
+    # Collapse axes of the centroid to determine how heavily a single
     # slice is represented by this cluster mask in each dimension
-    for c in centroids:
-        # Figure out the density of voxels in each slice, inf to sup
-        mask = (reshape_labels_to_3d(c.labels, c.original_shape) == c.label)
-        if ax == 2:
-            # feature_name = 'k_density'
-            density = np.sum(np.sum(mask, axis=0), axis=0)
-        elif ax == 1:
-            # feature_name = 'j_density'
-            density = np.sum(np.sum(mask, axis=0), axis=1)
-        else:  # ax == 0
-            # feature_name = 'i_density'
-            density = np.sum(np.sum(mask, axis=1), axis=1)
-        ratios = density / np.sum(density)
+    # Figure out the density of voxels in each slice, inf to sup
+    if ax == 2:
+        # feature_name = 'k_density'
+        density = np.sum(np.sum(mask, axis=0), axis=0)
+    elif ax == 1:
+        # feature_name = 'j_density'
+        density = np.sum(np.sum(mask, axis=0), axis=1)
+    else:  # ax == 0
+        # feature_name = 'i_density'
+        density = np.sum(np.sum(mask, axis=1), axis=1)
+    ratios = density / np.sum(density)
 
-        # Calculate a score to indicate the cluster is dominated by neck noise.
-        num_penalized_slices = 12
-        weights = np.ones(len(density)) * -1.0
-        leading_weights = [2.0 / (2**i) for i in range(num_penalized_slices)]
-        if direction > 0.0:
-            # start, stop = 0.0, len(density)
-            penalized_idx = list(range(num_penalized_slices))
-        else:
-            # start, stop = len(density), 0.0
-            penalized_idx = [(i + 1) * -1 for i in range(num_penalized_slices)]
-        weights[penalized_idx] = np.array(leading_weights)
+    # Calculate a score to indicate the cluster is dominated by neck noise.
+    num_penalized_slices = int(len(ratios) / 4.0)
+    weights = np.ones(len(density)) * -1.0
+    # This weight scheme was calibrated to maximize the confetti-like
+    # clusters in CerePET scans to be >0 and the good clusters to be <0
+    leading_weights = [3.0 / (2**(i / 3.0)) for i in range(num_penalized_slices)]
+    if direction > 0.0:
+        # start, stop = 0.0, len(density)
+        penalized_idx = list(range(num_penalized_slices))
+    else:
+        # start, stop = len(density), 0.0
+        penalized_idx = [(i + 1) * -1 for i in range(num_penalized_slices)]
+    weights[penalized_idx] = np.array(leading_weights)
 
-        # These weights add the proportion of voxels in the lowest slices,
-        # and penalize everything in head space. So a score of 1.0 would
-        # indicate very heavy influence of voxels in the bottom-most slice.
-        # A good cluster will probably have a negative score.
-        c.features['inf_weighted_score'] = np.sum(ratios * weights)
+    # These weights add the proportion of voxels in the lowest slices,
+    # and penalize everything in head space. So a score of 1.0 would
+    # indicate very heavy influence of voxels in the bottom-most slice.
+    # A good cluster will probably have a negative score.
+    return np.sum(ratios * weights)
 
 
 def calculate_spatial_info(centroids, step, logger, num_cpus=-1):
@@ -374,6 +380,11 @@ def find_centroids(
         k_means_worker, list_of_args, num_cpus, logger
     )
 
+    # Calculate underlying image's center of mass for all clusters
+    pet_mean_img = nil.image.mean_img(pet_4d_img, copy_header=True)
+    pet_vox_com = center_of_mass(pet_mean_img.get_fdata())
+    pet_world_com = affines.apply_affine(pet_mean_img.affine, pet_vox_com)
+
     # Retrieve and organize k-means results
     k_means_fits = {}
     all_centroids = []
@@ -400,7 +411,7 @@ def find_centroids(
                 original_affine=pet_4d_img.affine,
                 voxel_count=np.sum(kmeans_result['k_means'].labels_ == i),
                 voxels_in_img=len(kmeans_result['k_means'].labels_),
-                # labels=k_means.labels_ + 1,
+                # labels=kmeans_result['k_means'].labels_ + 1,
                 # blob_count=len(blob_ids),
                 # voxels_per_blob=np.mean(voxel_counts),
             )
@@ -414,6 +425,39 @@ def find_centroids(
                 if this_centroid.features[feature_label]:
                     feature_counts[feature_label] += 1
             feature_counts["total"] += 1
+
+            # Add confetti score feature
+            mask_3d = reshape_labels_to_3d(
+                np.array(kmeans_result['k_means'].labels_ == i, dtype=np.uint8),
+                pet_mean_img.shape,
+            )  # TODO: Cache the 3D and 2D versions of this someplace to avoid reordering them. This takes way too long, especially in debug!
+            this_centroid.features["confetti_score"] = calculate_axis_weights(
+                mask_3d, pet_4d_img
+            )
+            this_centroid.features['likely_confetti'] = \
+                this_centroid.features['confetti_score'] > 0.0
+
+            # Add centroid and underlying image's center of mass as features
+            this_centroid.features["pet_com_x"] = float(pet_world_com[0])
+            this_centroid.features["pet_com_y"] = float(pet_world_com[1])
+            this_centroid.features["pet_com_z"] = float(pet_world_com[2])
+            vox_com = center_of_mass(mask_3d)
+            world_com = affines.apply_affine(pet_mean_img.affine, vox_com)
+            diff_com = np.subtract(world_com, pet_world_com)
+            this_centroid.features["com_x"] = float(world_com[0])
+            this_centroid.features["com_y"] = float(world_com[1])
+            this_centroid.features["com_z"] = float(world_com[2])
+            this_centroid.features["com_shift_x"] = diff_com[0]
+            this_centroid.features["com_shift_y"] = diff_com[1]
+            this_centroid.features["com_shift_z"] = diff_com[2]
+            this_centroid.features["com_shift"] = distance.euclidean(
+                pet_world_com, world_com
+            )
+            feature_counts["total"] += 12
+
+            # If used, clear the huge labels matrix to avoid duplicating info
+            # this_centroid.labels = None
+
             all_centroids.append(this_centroid)
 
         if verbose:
@@ -439,19 +483,27 @@ def find_centroids(
     return all_centroids, k_means_fits
 
 
-def label_best_centroid(centroids, best_label="best_overall"):
+def label_best_centroid(centroids, best_label="best_overall", keep_confetti=False):
     """ From a list of centroids, go through and label the best. """
 
+    logger = logging.getLogger("STARE")
+
     best_centroid = None
+    if not keep_confetti:
+        centroids = [c for c in centroids
+                     if not c.features.get("likely_confetti", False)]
     if best_label == 'best_in_k':
         # Select the 'best' from among all vascular centroids.
         # Do this by finding the earliest peak, then among centroids
         # peaking there, find the highest. "highest-of-earliest"
         peak_idxs = np.array([c.peak_index for c in centroids])
-        earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
-        highest_early_peak_idx = earliest_peak_idxs[np.argmax([
-            centroids[i].peak_value for i in earliest_peak_idxs
-        ])]
+        if len(peak_idxs) > 0:
+            earliest_peak_idxs = np.where(peak_idxs == np.min(peak_idxs))[0]
+            highest_early_peak_idx = earliest_peak_idxs[np.argmax([
+                centroids[i].peak_value for i in earliest_peak_idxs
+            ])]
+        else:
+            return None
 
         # We once tried "earliest-of-highest", but it didn't work as well.
         """
@@ -467,14 +519,21 @@ def label_best_centroid(centroids, best_label="best_overall"):
 
     elif best_label == 'best_overall':
         top_indices, top_frequencies = np.unique(
-            [c.peak_index for c in centroids], return_counts=True
+            [c.peak_index for c in centroids
+             if (c.timepoints[c.peak_index] < 10)],  # assuming minutes, should check
+            return_counts=True
         )
+        logger.debug("Selecting best centroid of all best-in-k centroids:")
+        for ti, tf in zip(top_indices, top_frequencies):
+            logger.debug(f"  {tf} clusters peaked at index {ti}")
 
         # This is the most likely time point to have the best vascular peak,
         # but it is only about 90% accurate in our tests. So we'll also consider
         # the next time point, but only if it has both a higher peak than our
         # current best centroid and a more spatially concise clustering.
         if len(top_frequencies) == 0:
+            # We were passed an empty list for centroids
+            # Maybe later, we could allow overriding clusters to loosen thresholds.
             raise TypeError(f"None of the {len(centroids)} clusters appear "
                             "vascular. There's nothing more to be done.")
         best_centroid_idx = top_indices[np.argmax(top_frequencies)]
@@ -499,6 +558,7 @@ def find_vascular_centroids(
         step,
         mid_times=None,
         num_cpus=1,
+        keep_confetti=False,
         verbose=0,
         logger=None,
 ):
@@ -513,6 +573,7 @@ def find_vascular_centroids(
     :param int step: Which step of k-means, used for labeling centroids.
     :param iterable mid_times: will be stored alongside activity in TACs
     :param int num_cpus: how many processes to use on finding centroids
+    :param bool keep_confetti: Whether to keep the confetti-like clusters
     :param int verbose: Set non-zero to increase logging, higher is more
     :param logging.logger logger: output comments here if available
 
@@ -544,24 +605,33 @@ def find_vascular_centroids(
         other_centroids = []
         for centroid in [c for c in all_centroids if c.k == k]:
             if centroid.features.get("likely_vascular", False):
+                # if (keep_confetti or
+                #         centroid.features.get('confetti_score', 0.0) <= 0.0
+                # ):
                 vascular_centroids.append(centroid)
+                # else:
+                #     other_centroids.append(centroid)
             else:
                 other_centroids.append(centroid)
 
         for i, vc in enumerate(vascular_centroids):
-            logger.debug(f"  {vc.peak_value:0.3f} at {vc.peak_index}")
+            logger.debug(f"  {vc.label}/{vc.k}: {vc.peak_value:0.3f} at {vc.peak_index} "
+                         f"(confetti score: {vc.features.get('confetti_score', 0.0):0.3f})")
 
         # Label the top candidate for a vascular cluster from this k value.
         # Higher initial values are more indicative of arterial signal,
         # which is preferable to venous
         if len(vascular_centroids) > 0:
-            top_c = label_best_centroid(vascular_centroids, 'best_in_k')
-            logger.debug(
-                "  Early centroid [{}/{}] has peak of {:0.3f} at t {}".format(
-                    top_c.label, top_c.k, top_c.peak_value, top_c.peak_index,
+            top_c = label_best_centroid(vascular_centroids, 'best_in_k', keep_confetti)
+            if top_c:
+                logger.debug(
+                    "  Early centroid [{}/{}] has peak of {:0.3f} at t {}".format(
+                        top_c.label, top_c.k, top_c.peak_value, top_c.peak_index,
+                    )
                 )
-            )
-
+            else:
+                logger.debug("  Vascular centroids were all confetti-like.")
+        else: logger.debug(f"  No vascular centroids found for k={k}.")
         plural_string = "" if len(vascular_centroids) == 1 else "s"
         logger.info(
             f"  found {len(vascular_centroids)} potential vascular"
@@ -574,7 +644,15 @@ def find_vascular_centroids(
     best_in_k_centroids = [c for c in all_centroids if c.best_in_k]
     for c in best_in_k_centroids:
         c.name = f"Best step {step}. {c.name}"
-    label_best_centroid(best_in_k_centroids, 'best_overall')
+    very_top_c = label_best_centroid(best_in_k_centroids, 'best_overall')
+    if very_top_c:
+        logger.debug(
+            f"  From {len(best_in_k_centroids)} best-in-k options, "
+            f"selected centroid [{very_top_c.label}/{very_top_c.k}] has peak of "
+            f"{very_top_c.peak_value:0.3f} at t {very_top_c.peak_index}"
+        )
+    else:
+        logger.debug("  Improbably, all best-in-k centroids were confetti-like.")
 
     # Return a list of all centroids, with the best labelled as such.
     return all_centroids, k_means_fits
@@ -785,6 +863,7 @@ def consider_alternate_clusters(
                 # We have an alternate centroid with a higher peak and a
                 # less spatially sparse clustering. We will use it.
                 html_lines.append(
+                    "NOT REALLY IN THIS VERSION: "
                     f"Overriding the cluster selection with an alternate!!"
                     f" original best {first_choice_centroid.description()};"
                     f" new best is {alt_centroid.description()}."
