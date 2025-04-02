@@ -22,7 +22,7 @@ class TimeActivityCurve:
         # Rounding to the nearest millisecond prevents this problem.
         self.timepoints = np.asarray([
             round(t, 3) for t in timepoints
-        ])  # ndarray shaped ~ (1000000,)
+        ])  # ndarray shaped ~ (1000000, )
         self.sd = None if sd is None else np.asarray(sd)  # ndarray ~ (25,)
         self.source = source  # where did this centroid come from
         self.name = name  # what I should call this TAC in a figure legend
@@ -65,7 +65,7 @@ class TimeActivityCurve:
             "auc": self.auc(),
         }
         for f in self.features:
-            if (isinstance(self.features[f], tuple) or isinstance(f, list)):
+            if isinstance(self.features[f], tuple) or isinstance(f, list):
                 for i, thing in enumerate(self.features[f]):
                     d[f"feature_{f}_{i + 1}"] = thing
             elif isinstance(self.features[f], dict):
