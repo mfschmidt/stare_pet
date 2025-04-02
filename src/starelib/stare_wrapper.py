@@ -36,7 +36,7 @@ def get_argument_parser():
     )
     parser.add_argument(
         "subject",
-        help="The subject id",
+        help="The subject id. Arguments 'ID' or 'sub-ID' are equivalent.",
     )
     parser.add_argument(
         "-i", "--input-path", type=Path, default=".",
@@ -61,6 +61,10 @@ def get_argument_parser():
     parser.add_argument(
         "-u", "--pet-units", type=str, default='kBq',
         help="PET Units, default to 'kBq'.",
+    )
+    parser.add_argument(
+        "-t", "--time-units", type=str, default='min',
+        help="Time Units, from TACS and/or midtimes files, default to 'min'.",
     )
     parser.add_argument(
         "--pvc-method", type=str, default='STC',
@@ -124,6 +128,14 @@ def get_argument_parser():
              "cluster, compare it to alternative clusters, and change its "
              "selection if it finds a better option. Note that 'better' is "
              "subject to many factors and may change version-to-version."
+    )
+    parser.add_argument(
+        "--keep-confetti-pattern", action="store_true",
+        help="By default, STARE will not consider k-means clusters that look "
+             "like 'confetti on the floor'. Noisy scans may produce these "
+             "and they can have high early peaks that prevent selection "
+             "of good vascular clusters. This option causes STARE to include "
+             "these clusters as 'likely_vascular' while scoring them."
     )
     parser.add_argument(
         "--latest-usable-volume", type=int, default=-1,
@@ -214,13 +226,24 @@ def validate_arguments(args):
     if not args.debug:
         warnings.filterwarnings("ignore")
 
+    # Use just the ID value, not its BIDS key
+    if args.subject.startswith("sub-"):
+        args.subject = args.subject[4:]
+
     # Ensure the input location exists, and contains the subject.
     if Path(args.input_path).exists():
-        if not (Path(args.input_path) / args.subject).exists():
-            errors.append(f"There is no subject '{args.subject}' "
-                          f"at '{args.input_path}'.")
+        if (Path(args.input_path) / args.subject).is_dir():
+            setattr(args, "subject_path",
+                    Path(args.input_path) / args.subject)
+        elif (Path(args.input_path) / f"sub-{args.subject}").is_dir():
+            setattr(args, "subject_path",
+                    Path(args.input_path) / f"sub-{args.subject}")
+        else:
+            errors.append(f"There is neither subject '{args.subject}' nor "
+                          f"'sub-{args.subject}' at '{args.input_path}'.")
     else:
         errors.append(f"The input path, '{args.input_path}' does not exist.")
+
     if args.tac_file is not None:
         if not args.tac_file.exists():
             errors.append(f"An explicit TAC file, '{str(args.tac_file)}' was "
@@ -229,9 +252,9 @@ def validate_arguments(args):
                           " It does not need to be specified.")
 
     # Ensure the output location exists, and is writable.
-    setattr(args, "output_path", Path(args.output_path))
-    if not args.output_path.name == args.subject:
-        args.output_path = Path(args.output_path) / args.subject
+    setattr(args, "output_path", Path(args.output_path) / args.subject)
+    # if not args.output_path.name == f"sub-{args.subject}":
+    #     args.output_path = Path(args.output_path) / f"sub-{args.subject}"
     if not args.output_path.exists():
         args.output_path.mkdir(parents=True, exist_ok=True)
         print(f"Creating '{str(args.output_path)}', which did not exist.")
@@ -259,10 +282,12 @@ def validate_arguments(args):
     # Ensure we have regions to work with.
     if args.regions is None:
         # If not specified, use a default bucket of regions.
-        setattr(args, "regions",
-                ['cerfullcs_c', 'cin', 'hip', 'par', 'pph', 'pip', ])
-        # msg = f"No regions are specified; there's nothing to be done."
-        # errors.append(msg)
+        # These are old BAT regions, and should probably be updated to
+        # FreeSurfer or PICNIC
+        # setattr(args, "regions",
+        #         ['cerfullcs_c', 'cin', 'hip', 'par', 'pph', 'pip', ])
+        msg = f"No regions are specified; there's nothing to be done."
+        errors.append(msg)
 
     # Ignored frames should be indexed by integer
     if args.ignore_frames is None:
