@@ -1,3 +1,4 @@
+import os
 import logging
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ import re
 from nibabel import Nifti1Image
 from sklearn.metrics.pairwise import cosine_similarity
 from nilearn.image import coord_transform
+
 
 class StareVolume:
     """ Wrap a Nifti1Image with additional metadata needed for STARE """
@@ -705,3 +707,138 @@ def get_s_i_axis(img_shape, img_affine):
             return ax, 1
         elif world_coords[ax] == max_z:
             return ax, -1
+
+
+def write_fsl_script(
+        stare_output_path,
+        script_file_name,
+):
+    """ Write a fsleyes script to view a background and provided image.
+    """
+
+    errors = list()
+
+    # Fine a background image
+    try:
+        background_image_path = sorted(stare_output_path.glob("*orig_mean.nii.gz"))[0]
+    except IndexError:
+        errors.append(f"No background image found in {stare_output_path}")
+        background_image_path = None
+
+    # Find selected step one and step two clusters
+    try:
+        step_one_mask_path = sorted(stare_output_path.glob(
+            "masks/cluster_step-1_best_mask.nii.gz"
+        ))[0]
+    except IndexError:
+        errors.append(f"No step 1 mask image found in {stare_output_path}")
+        step_one_mask_path = None
+    try:
+        step_two_mask_path = sorted(stare_output_path.glob(
+            "masks/cluster_step-2_best_mask.nii.gz"
+        ))[0]
+    except IndexError:
+        errors.append(f"No step 2 mask image found in {stare_output_path}")
+        step_two_mask_path = None
+
+    # Are there any debug masks to put into the viewer?
+    debug_masks = sorted(stare_output_path.glob(
+        "debug/masks/vascular/cluster_*_mask.nii.gz"
+    ))
+    metadata_files = list(stare_output_path.glob(
+        "debug/sub-*_vasc_clust_step-1_metadata.csv"
+    ))
+    if len(metadata_files) > 0:
+        metadata = pd.read_csv(metadata_files[0])
+        earliest_peak = metadata['peak_index'].min()
+    else:
+        earliest_peak = 0
+        metadata = None
+
+    # Write a script to open images in fsleyes
+    script_file = str(Path(stare_output_path) / script_file_name)
+    with (open(script_file, "w") as f):
+        f.write("#!/bin/bash\n\n")
+        f.write("# Execute fsleyes with all relevant images loaded\n")
+        if background_image_path is None:
+            f.write(f"echo \"No background image found in {stare_output_path}\"")
+        if step_one_mask_path is None:
+            f.write(f"echo \"No step 1 mask image found in {stare_output_path}\"")
+        if step_two_mask_path is None:
+            f.write(f"echo \"No step 2 mask image found in {stare_output_path}\"")
+
+        f.write("fsleyes \\\n")
+        if background_image_path:
+            f.write(f"\"./{background_image_path.name}\" \\\n")
+            f.write(f"  --name \"Average PET\" --overlayType volume \\\n")
+        other_vasc_lines = list()
+        best_in_k_lines = list()
+        for mask_file in debug_masks:
+            match = re.search(
+                r"_k-([0-9][0-9])_label-([0-9][0-9])_",
+                mask_file.name
+            )
+            if match:
+                k = int(match.group(1))
+                label = int(match.group(2))
+                if metadata is None:
+                    continue
+                row_mask = (metadata['k'] == k) & (metadata['label'] == label)
+                # print(f"{np.sum(metadata['k'] == k)} rows with k={k:02d}")
+                # print(f"{np.sum(metadata['label'] == label)} rows "
+                #       f"with label={label:02d}")
+                # print(f"Cluster {label:02d}/{k:02d} has "
+                #       f"{np.sum(row_mask)} metadata rows")
+                if np.sum(row_mask) == 0:
+                    continue
+                if metadata.loc[row_mask, 'peak_index'].values[0] > earliest_peak + 3:
+                    continue
+                if not metadata.loc[row_mask, 'feature_likely_vascular'].values[0]:
+                    continue
+                disabled_str = ""
+                cluster_name = (
+                    f"Step 1 K={k:02d} label={label:02d} "
+                    f"peak {metadata.loc[row_mask, 'peak_value'].values[0]:0.3f} "
+                    f"@t={metadata.loc[row_mask, 'peak_index'].values[0]}")
+                if metadata.loc[row_mask, 'best_overall'].values[0]:
+                    cluster_name += " (best)"
+                    rgb_str = "0.1 0.9 0.1"
+                    list_for_mask = best_in_k_lines
+                elif metadata.loc[row_mask, 'best_in_k'].values[0]:
+                    cluster_name += " (best in k)"
+                    rgb_str = "0.2 0.8 0.2"
+                    list_for_mask = best_in_k_lines
+                    disabled_str = " --disabled"
+                else:
+                    rgb_str = "0.1 0.5 0.9"
+                    list_for_mask = other_vasc_lines
+                    disabled_str = " --disabled"
+                if list_for_mask is not None:
+                    list_for_mask.append(
+                        f"\"./debug/masks/vascular/{mask_file.name}\" \\\n"
+                        f"  --name \"{cluster_name}\" --overlayType mask \\\n"
+                        f"  --maskColour {rgb_str} --alpha 30 {disabled_str} \\\n"
+                    )
+
+        for line in other_vasc_lines:
+            f.write(line)
+        for line in best_in_k_lines:
+            f.write(line)
+        if step_one_mask_path:
+            f.write(f"\"./masks/{step_one_mask_path.name}\" \\\n")
+            f.write(f"  --name \"Selected Step 1 Cluster\" --overlayType mask \\\n")
+            f.write(f"  --maskColour 1.0 1.0 0.0 --alpha 50 \\\n")
+        if step_two_mask_path:
+            f.write(f"\"./masks/{step_two_mask_path.name}\" \\\n")
+            f.write(f"  --name \"Selected Step 2 Cluster\" --overlayType mask \\\n")
+            f.write(f"  --maskColour 1.0 0.0 0.0 --alpha 50 \\\n")
+        f.write("\n\n")  # to terminate the \\ above
+        f.write("#   --worldLoc x y z or --voxelLoc x y z\n\n")
+        f.write("# Notes:\n\n")
+        f.write("# If fsleyes is older than version 1.10.2 (January, 2024),\n")
+        f.write("# transparency will not be applied to the masks.\n")
+        f.write("# See https://fsl.fmrib.ox.ac.uk/fsl/docs/#/install/index/ to update.\n")
+
+    os.chmod(script_file, 0o755)
+
+    return script_file
