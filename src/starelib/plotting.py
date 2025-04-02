@@ -621,7 +621,7 @@ def draw_bounds_and_peak(
     yc, yt, _ = fwhm[:, 1]  # along the y axis: bottom, center, top
 
     if verbose:
-        print(f"{label_prefix}: "
+        print(f"<in draw_bounds_and_peak> {label_prefix}: "
               f"({xl:0.3f}, {yc:0.1%}), "
               f"({xc:0.3f}, {yt:0.1%}), "
               f"({xr:0.3f}, {yc:0.1%})")
