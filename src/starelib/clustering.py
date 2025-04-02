@@ -1,4 +1,3 @@
-import stat
 from pathlib import Path, PurePath
 import numpy as np
 import pandas as pd
@@ -10,11 +9,11 @@ from datetime import datetime
 import pickle
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
-from importlib.resources import files
+
 
 from .util import (
     flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d,
-    collapse_array_3d,
+    collapse_array_3d, write_fsl_script
 )
 from .util import from_cache, to_cache
 from .centroid import Centroid
@@ -23,7 +22,7 @@ from .plotting import plot_top_centroids_atlas
 from .centroid_heuristics import (
     find_vascular_centroids, likely_irreversible_linear,
     consider_alternate_clusters, calculate_spatial_info,
-    calculate_k_stability, calculate_axis_weights, build_similarity
+    calculate_k_stability, build_similarity
 )
 from .components import decompose_components
 
@@ -75,6 +74,7 @@ def make_atlas_and_mask(
         cluster_atlas_data = image.resample_img(
             cluster_atlas_img, target_affine=resample_to.affine,
             interpolation='nearest', target_shape=resample_to.shape,
+            force_resample=True,
             copy_header=True,
         ).get_fdata()
 
@@ -329,7 +329,8 @@ def post_process_clusters(
     for c in vascular_centroids:
         a = c.labels if c.labels is not None else np.zeros((0,))
         logger.debug(f"C {c.label}/{c.k} labels {a.shape}")
-        c.labels = k_means_model_fits[c.k].labels_ + 1
+        if c.labels is None:  # We'd never find an overridden cluster's labels
+            c.labels = k_means_model_fits[c.k].labels_ + 1
     # Send centroids off to be run in multiple processes
     # Separate processes cannot share memory, so we do the calculations,
     # then overwrite our vascular centroids list with the new ones.
@@ -352,8 +353,6 @@ def post_process_clusters(
     logger.info("Calculating centroid similarity and k-stability")
     sim_mat = build_similarity(vascular_centroids)
     calculate_k_stability(vascular_centroids, sim_mat)
-    logger.info("Calculating axis weights for detecting inf_weighted_score.")
-    calculate_axis_weights(vascular_centroids, pet_4d_img)
 
     if (
             (step == 1) and
@@ -438,6 +437,7 @@ def load_or_calculate_clusters(
             source_4d_image, ks, step,
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
+            keep_confetti=results.args.keep_confetti_pattern,
             verbose=results.args.verbose,
             logger=logger,
         )
@@ -571,20 +571,57 @@ def fake_centroid_from_mask(
     # Load alternate mask and use it to build a fake cluster centroid
     if isinstance(new_mask, str) or isinstance(new_mask, PurePath):
         _fake_3d_mask = nib.Nifti1Image.from_filename(new_mask)
-        print(f" |fc| Loaded {_fake_3d_mask.shape}-shaped mask from disk ('{new_mask}')")
+        print(f" |fc| Loaded {_fake_3d_mask.shape}-shaped mask from disk "
+              f"('{new_mask}')")
     else:
         _fake_3d_mask = nib.Nifti1Image(new_mask, pet_4d_img.affine)
-        print(f" |fc| Made {new_mask.shape}-shaped new_mask into a Nifti1Image")
+        print(f" |fc| Made {new_mask.shape}-shaped new_mask into Nifti1Image")
     if _fake_3d_mask.shape != basis_centroid.original_shape[:3]:
-        _fake_3d_mask = image.resample_img(
-            _fake_3d_mask,
-            target_affine=basis_centroid.original_affine,
-            interpolation='nearest',
-            target_shape=basis_centroid.original_shape[:3],
-            copy_header=True,
-        )
-        print(f" |fc| Resampled mask to {_fake_3d_mask.shape} with "
-              f"{np.sum(_fake_3d_mask):,} hot voxels.")
+        print(f" |fc| Original {basis_centroid.original_shape[:3]}-shaped")
+
+        # If we resampled the original to do k-means, we may need a special crop
+        if (    (basis_centroid.original_shape[0] < _fake_3d_mask.shape[0]) and
+                (basis_centroid.original_shape[1] < _fake_3d_mask.shape[1]) and
+                (basis_centroid.original_shape[2] < _fake_3d_mask.shape[2])
+        ):
+            # And if we both clipped and resampled, clip first, then resample
+            x_ratio = _fake_3d_mask.shape[0] / basis_centroid.original_shape[0]
+            y_ratio = _fake_3d_mask.shape[1] / basis_centroid.original_shape[1]
+            z_ratio = _fake_3d_mask.shape[2] / basis_centroid.original_shape[2]
+            if x_ratio == y_ratio != z_ratio:
+                clip_level = int(
+                    _fake_3d_mask.shape[2] -
+                    (x_ratio * basis_centroid.original_shape[2])
+                )
+                _fake_3d_mask = _fake_3d_mask.slicer[:, :, clip_level:]
+                print(f" |fc| Clipped mask by {clip_level} to {_fake_3d_mask.shape}")
+
+        # A crop may also have been applied without resampling.
+        elif (    (basis_centroid.original_shape[0] == _fake_3d_mask.shape[0]) and
+                (basis_centroid.original_shape[1] == _fake_3d_mask.shape[1]) and
+                (basis_centroid.original_shape[2] < _fake_3d_mask.shape[2])
+        ):
+            # We just need to crop axial slices to match, no resampling
+            slices_to_clip = _fake_3d_mask.shape[2] - basis_centroid.original_shape[2]
+            print(f" |fc| Clipping {slices_to_clip} slices from the new mask")
+            _fake_3d_mask = _fake_3d_mask.slicer[:,:, slices_to_clip:]
+
+        # Now that clipping's handled, do we need to resample?
+        if ((basis_centroid.original_shape[0] < _fake_3d_mask.shape[0]) and
+                (basis_centroid.original_shape[1] < _fake_3d_mask.shape[1]) and
+                (basis_centroid.original_shape[2] < _fake_3d_mask.shape[2])
+        ):
+            _fake_3d_mask = image.resample_img(
+                _fake_3d_mask,
+                target_affine=basis_centroid.original_affine,
+                interpolation='nearest',
+                target_shape=basis_centroid.original_shape[:3],
+                force_resample=True,
+                copy_header=True,
+            )
+            print(f" |fc| Resampled mask to {_fake_3d_mask.shape} with "
+                  f"{np.sum(_fake_3d_mask.get_fdata().astype(bool)):,} hot voxels.")
+
     _fake_flat_mask = np.squeeze(flatten_4d_to_2d(
         np.expand_dims(_fake_3d_mask.get_fdata(), 3),
     )).astype(bool)
@@ -601,10 +638,17 @@ def fake_centroid_from_mask(
     masked_2d_data = flatten_4d_to_2d(pet_4d_img.get_fdata())[_fake_flat_mask, :]
     new_centroid.activity = np.mean(masked_2d_data, axis=0)
     new_centroid.source = "manual override"
-    new_centroid.labels = _fake_flat_mask.astype(np.uint8) * new_centroid.label
+    new_centroid.labels = _fake_flat_mask.astype(np.bool).astype(np.uint8)
+    new_centroid.label = 1
+    new_centroid.k = 1
+    new_centroid.peak_value = np.max(new_centroid.activity)
+    new_centroid.peak_index = np.argmax(new_centroid.activity)
     new_centroid.update_spatial_clusters(force_update=True)
 
-    print(f" |fc| [{', '.join([f'{a:0.1f}' for a in new_centroid.activity])}]")
+    print(f" |fc| [{', '.join([f'{a:0.2f}' for a in new_centroid.activity[:10]])}]")
+    print(f" |fc| peak activity {new_centroid.peak_value:0.3f} "
+          f"@ t={new_centroid.timepoints[new_centroid.peak_index]:0.3f} "
+          f"(t#{new_centroid.peak_index})")
     print(f" |fc| {new_centroid.blob_data.shape}-shaped blob_data")
 
     # Return the real data, masked by the new mask, to be fed into step two.
@@ -662,6 +706,7 @@ def resample_for_clustering(original_image, resample_string, logger=None):
             return (
                 image.resample_img(
                     original_image, target_affine=target_affine,
+                    force_resample=True,
                     copy_header=True,
                 ),
                 True,
@@ -887,23 +932,9 @@ def two_step_cluster(results):
     rpt_sect.end()
     results.write_report()
 
-    # Copy over a script to view the clusters
-    try:
-        # If 'stare_pet' was installed, this is where we'll find it.
-        src_file = files('starelib.scripts').joinpath('view_in_fsleyes.sh')
-    except ModuleNotFoundError as e:
-        # If 'stare_pet' is running from source, we'll find it here.
-        src_file = Path(__file__).parent.parent / "scripts" / "view_in_fsleyes.sh"
-    if src_file.exists():
-        tgt_file = results.args.output_path / "view_in_fsleyes.sh"
-        logger.info("Copying 'view_in_fsleyes.sh' from '{}' to '{}'".format(
-            src_file.parent, tgt_file.parent
-        ))
-        tgt_file.write_text(src_file.read_text())
-        tgt_file.chmod(
-            tgt_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-    else:
-        logger.warning(f"I could not find the 'view_in_fsleyes.sh' script.")
+    # Provide a script to view the clusters
+    # This script is written dynamically to find debug masks
+    # if they were written and color everything appropriately.
+    write_fsl_script(results.args.output_path, "view_clusters_with_fsleyes.sh")
 
     return results
