@@ -111,16 +111,30 @@ def fit_curves_mp(
         results.logger,
     ) for i in range(num_curves)]
 
+    # Send {num_curves} tuples to run themselves.
+    # If any fails, we'll get less than {num_curves} sets of parameters,
+    # so each process should keep running CurveGenerator until it gets one
+    # that works.
     curve_fit_results = run_in_mp_queue(
         bootstrap_worker, list_of_args, results.args.num_cpus, results.logger
     )
 
     # Count up failures from fitting all the curves and report them.
+    num_successful_curves = sum([
+        ((r['fit_exp'] is not None) and
+         (np.isnan(r['rate_constants']).sum() == 0))
+        for r in curve_fit_results
+    ])
     num_tac_failures = sum([r['tac_failure_count'] for r in curve_fit_results])
     num_exp_failures = sum([r['exp_failure_count'] for r in curve_fit_results])
+    num_nan_failures = sum([r['nan_failure_count'] for r in curve_fit_results])
+    num_none_failures = sum([r['none_failure_count'] for r in curve_fit_results])
     results.logger.info(
-        f"Fitting {len(curve_fit_results):,} curves successfully required "
-        f"{num_tac_failures:,} tac-fit failures, "
+        f"Fitting {num_successful_curves} curves "
+        f"(with a goal of {len(curve_fit_results):,}) "
+        f"required {num_tac_failures:,} tac-fit failures, "
+        f"and {num_nan_failures:,} with NaNs in the rate constants, "
+        f"and {num_none_failures:,} with None as a result, "
         f"after {num_exp_failures:,} triple-exponential-fit failures. "
     )
 
@@ -132,6 +146,14 @@ def fit_curves_mp(
         all_exp_failures.join(result['exp_failures'])
         del result['exp_failures']
         del result['tac_failures']
+    if results.args.debug:
+        pickle.dump(
+            {
+                'tac_failures': all_tac_failures,
+                'exp_failures': all_exp_failures,
+            },
+            open(results.args.debug_path / "boot_anchor_failures.pkl", "wb")
+        )
 
     results.logger.info(
         f"A grand total of {len(all_exp_failures):,} "
@@ -331,11 +353,18 @@ def bootstrap_worker(arg_tuple):
     # Maintain a count of all failures, and their types
     cumulative_exp_failures = FailureCollection()
     cumulative_tac_failures = FailureCollection()
-    exp_failure_count, tac_failure_count = 0, 0
+    num_exp_fails, num_tac_fails, num_none_fails, num_nan_fails = 0, 0, 0, 0
     bootstrap_curve, rate_constants, exp_fit = None, None, None
     final_curve = None
-    while final_curve is None:
-
+    # A reasonable curve fits in 1-5 seconds. Some take up to 30 seconds.
+    # But when we fit non-vascular tacs, they can go for hours or forever.
+    # So here we limit the search to 10 minutes or a million failures.
+    # We will have failures at 10 min each, but must draw the line somewhere.
+    while (
+            (final_curve is None) and
+            (num_exp_fails < 2**12) and  # about 4,000 failures (up to 8k each)
+            ((datetime.now() - worker_start).total_seconds() < 600)
+    ):
         # First, generate a random curve to serve as a starting point.
         bootstrap_curve = curve_generator.new()
 
@@ -345,7 +374,7 @@ def bootstrap_worker(arg_tuple):
         )
         cumulative_exp_failures.join(fit_exp_failures)
         if exp_fit is None:
-            exp_failure_count += 1
+            num_exp_fails += 1
             # failed_bootstrap_curves.append(bootstrap_curve)
             continue
 
@@ -359,19 +388,33 @@ def bootstrap_worker(arg_tuple):
             ~np.any(np.isnan(rate_constants[_].ravel()))
             for _ in range(rate_constants.shape[0])
         ]]
-        if len(good_rate_constants) == 0:
-            tac_failure_count += 1
+        if good_rate_constants is None:
+            num_none_fails += 1
+            continue
+        elif len(good_rate_constants) == 0:
+            num_tac_fails += 1
+            continue
+        elif np.isnan(good_rate_constants).sum() > 0:
+            num_nan_fails += 1
             continue
         else:
             final_curve = good_rate_constants  # triggers break from while loop
 
     worker_end = datetime.now()
-    logger.debug(f"    Finished worker for curve {i} "
+    verb = "Failed" if final_curve is None else "Finished"
+    logger.debug(f"    {verb} bootstrap_worker for curve {i} "
+                 f"with {num_exp_fails:,} exp-fit failures, "
+                 f"{num_none_fails:,} None-result failures, "
+                 f"{num_tac_fails:,} tac-fit failures, and "
+                 f"{num_nan_fails:,} NaN-containing failures "
                  f"at {worker_end.strftime('%m/%d %I:%M')} "
                  f"after {worker_end - worker_start}.")
     for handler in logger.handlers:
         handler.flush()
 
+    num_total_fails = sum([
+        num_exp_fails, num_tac_fails, num_none_fails, num_nan_fails
+    ])
     return {
         "i": i,
         # "failed_bootstrap_curves": failed_bootstrap_curves,
@@ -379,9 +422,12 @@ def bootstrap_worker(arg_tuple):
         "fit_exp": exp_fit,
         "rate_constants": rate_constants,
         "exp_failures": cumulative_exp_failures,
-        "exp_failure_count": exp_failure_count,
+        "exp_failure_count": num_exp_fails,
         "tac_failures": cumulative_tac_failures,
-        "tac_failure_count": tac_failure_count,
+        "tac_failure_count": num_tac_fails,
+        "none_failure_count": num_none_fails,
+        "nan_failure_count": num_nan_fails,
+        "total_failure_count": num_total_fails,
         "elapsed_time": worker_end - worker_start,
     }
 
@@ -423,24 +469,28 @@ def boot_anchor(results):
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
     cache_file = f"sub-{results.args.subject}_step-4_bootstrap_curve_fits.pkl"
-    good_curves_fits = from_cache(
+    curves_fits = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
-    if good_curves_fits is None:
+    if curves_fits is None:
         # pvc_mean_tac is only used for timepoints and weights, NOT activity
-        good_curves_fits = fit_curves_mp(
+        curves_fits = fit_curves_mp(
             results, bootstrap_iterations, num_2tc_params,
         )
-        to_cache(good_curves_fits, results.args.cache_path, cache_file)
+        to_cache(curves_fits, results.args.cache_path, cache_file)
     else:
         logger.info("  loaded cached step 4 curve fits to save time")
 
     num_failures = np.sum([
-        r['exp_failure_count'] + r['tac_failure_count']
-        for r in good_curves_fits
+        r['total_failure_count'] for r in curves_fits
     ])
-    num_total_bootstraps = len(good_curves_fits) + num_failures
+    num_total_bootstraps = len(curves_fits) + num_failures
 
+    good_curves_fits = [
+        curve_fit for curve_fit in curves_fits
+        if ((curve_fit['fit_exp'] is not None) and
+            (np.isnan(curve_fit['rate_constants']).sum() == 0))
+    ]
     if len(good_curves_fits) == 0:
         logger.error("FAILURE: No curves could be fit!!")
         rpt_sect.add_line("No curves were fit during bootstrapping!")
