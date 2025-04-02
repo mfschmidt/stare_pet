@@ -61,7 +61,7 @@ def fit_curve_to_exponential(bootstrap_curve, vascular_tac, uniform_tac):
             uniform_tac.pre_peak_activity(),
             post_peak_boot_curve_fit_uniform
         ])
-        if np.any(full_boot_curve_fit_uniform < 0.0):
+        if np.any(post_peak_boot_curve_fit_uniform < 0.0):
             failures.append(Failure(failure_codes.TAC_HAS_NEGATIVES, fit['p0']))
             return None, failures
         else:
