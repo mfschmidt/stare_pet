@@ -1,3 +1,4 @@
+import json
 import sys
 import logging
 import re
@@ -141,6 +142,9 @@ def get_tacs(results):
         if 'MidTime' in results.original_tacs.columns:
             results.original_mid_times = results.original_tacs[['MidTime', ]]
             results.original_mid_times.columns = ['t', ]
+        if 'Unnamed: 0' in results.original_tacs.columns:
+            results.original_mid_times = results.original_tacs[['Unnamed: 0', ]]
+            results.original_mid_times.columns = ['t', ]
 
     # Else, find one in the input_path
     else:
@@ -174,23 +178,53 @@ def get_tacs(results):
     return results
 
 
-def get_plasma(subject_dir, subject_id, tracer, logger=None):
+def get_plasma(results):
     """ Find a plasma file and read its data
 
-    :param subject_dir: path to find subjects
-    :param subject_id: name of subject folder
-    :param str tracer: what tracer was injected
-    :param logger: where to send messages
-    :return pandas.DataFrame: A Centroid containing plasma activity
+    :param results: an object containing all the global data for stare_pet
+    :return pandas.DataFrame, pathlib.Path: A Centroid containing plasma activity
+        and the path to the plasma file used.
     """
 
-    logger = logging.getLogger("STARE") if logger is None else logger
+    # See if a plasma file was specified, and if it looks like BIDS
+    plasma_data_file, plasma_metadata_file = None, None
+    if results.args.plasma_file is not None:
+        if results.args.plasma_file.name.endswith(".tsv"):
+            plasma_data_file = results.args.plasma_file
+            plasma_metadata_file = plasma_data_file.with_suffix(".json")
+        elif results.args.plasma_file.name.endswith(".json"):
+            plasma_data_file = results.args.plasma_file.with_suffix(".tsv")
+            plasma_metadata_file = plasma_data_file.with_suffix(".json")
 
-    plasma_data, plasma_file = get_tsv_data(
-        subject_dir, subject_id, "plasma", tracer, logger
+    if (    (plasma_data_file is not None) and plasma_data_file.exists() and
+            (plasma_metadata_file is not None) and plasma_metadata_file.exists()
+    ):
+        plasma_data = pd.read_csv(plasma_data_file, header=0, index_col=None, sep="\t")
+        plasma_metadata = json.loads(plasma_data_file.with_suffix(".json").read_text())
+        try:
+            time_units = plasma_metadata.get("time").get("Units")
+            activity_units = plasma_metadata.get("plasma_radioactivity").get("Units")
+        except KeyError:
+            time_units = None
+            activity_units = None
+        if time_units == "Bq/mL":
+            plasma_data['plasma_radioactivity'] = plasma_data['plasma_radioactivity'] / 37000
+        return TimeActivityCurve(
+            activity=plasma_data['plasma_radioactivity'].values.astype(float),
+            timepoints=plasma_data['time'].values.astype(float),
+            source="plasma",
+            name="plasma",
+            time_units=time_units,
+            activity_units=activity_units,
+        ), plasma_data_file
+
+    # A plasma file was not specified, but we can look for one.
+    plasma_data, plasma_data_file = get_tsv_data(
+        results.args.subject_path, results.args.subject,
+        "plasma", results.args.tracer, results.logger
     )
     if plasma_data is None:
-        return None, plasma_file
+        return None, plasma_data_file
     if (    ('PlasRawY' in plasma_data.columns) and
             ('PlasRawT' in plasma_data.columns)
     ):
@@ -199,7 +233,7 @@ def get_plasma(subject_dir, subject_id, tracer, logger=None):
             timepoints=plasma_data['PlasRawT'].values.astype(float),
             source="plasma",
             name="plasma",
-        ), plasma_file
+        ), plasma_data_file
     elif (    ('time' in plasma_data.columns) and
               ('plasma_radioactivity' in plasma_data.columns)
     ):
@@ -208,10 +242,10 @@ def get_plasma(subject_dir, subject_id, tracer, logger=None):
             timepoints=plasma_data['time'].values.astype(float),
             source="plasma",
             name="plasma",
-        ), plasma_file
+        ), plasma_data_file
     else:
         # This should not happen
-        return None, plasma_file
+        return None, plasma_data_file
 
 
 def get_mid_times(results):
@@ -504,13 +538,9 @@ def gather_data(results):
         )
 
     # Get plasma data if it's available, but this is not required.
-    plasma_tac, plasma_file = get_plasma(
-        args.subject_path, args.subject, args.tracer, logger=logger
-    )
+    plasma_tac, plasma_file = get_plasma(results)
     if plasma_tac is None:
         logger.warning("Could not find any plasma TACs.")
-        for failed_file in plasma_file:  # list of files if none are found
-            logger.error(f"  tried '{str(failed_file)}'")
         logger.warning("STARE doesn't need plasma, but plots it if available.")
     else:
         rpt_sect.add_line(f"Found plasma data in <code>'{plasma_file}'</code>.")
@@ -524,34 +554,60 @@ def gather_data(results):
 
     # Load PET images
     logger.debug("Looking for motion-corrected PET data...")
+    pet_data_input_file, pet_metadata_input_file = None, None
     combined_image, volumes = None, None
 
-    # The first preference is if there is already a cached 4D image.
+    # The first preference is if there is already a STARE-written 4D image.
     cached_img_file = args.output_path / f"sub-{args.subject}_orig_4d.nii.gz"
     if combined_image is None and cached_img_file.exists():
-        # If the image was cached, it was cached without the ignored frames
-        combined_image, volumes = get_4D_data(
-            cached_img_file, args.output_path, args.subject, rpt_sect,
-            ignored_volumes=args.ignore_frames,
-            highest_volume=args.latest_usable_volume,
-            logger=logger
-        )
+        # This image was saved with all ignored and end frames
+        # so here we must remove them again.
+        pet_data_input_file = cached_img_file
 
-    # The next preference is a 4D image from the PICNIC pipeline.
-    picnic_img_file = Path("/NOT_A_FILE.ext")
-    for img in subject_dir.glob(
-        f"sub-{results.args.subject}_ses-*_*.nii.gz"
-    ):
-        # There should only be one file (or none)
-        # It ought to be a *_moco.nii.gz or *_coreg.nii.gz
-        picnic_img_file = img
+    # The next preference is for a user-specified 4D image
+    if args.pet_file is not None:
+        pet_data_input_file = Path(args.pet_file)
+
+
+    # And if that doesn't exist,
+    # the next preference is a 4D image from the PICNIC pipeline.
+    picnic_img_file = Path("/can/not/possibly/exist")
+    if not picnic_img_file.exists():
+        for img in subject_dir.glob(
+            f"sub-{results.args.subject}_ses-*_*.nii.gz"
+        ):
+            # There should only be one file (or none)
+            # It ought to be a *_moco.nii.gz or *_coreg.nii.gz
+            picnic_img_file = img
     if combined_image is None and picnic_img_file.exists():
+        pet_data_input_file = picnic_img_file
+
+    # We found a single 4D file, yay!
+    if pet_data_input_file is not None:
         combined_image, volumes = get_4D_data(
-            picnic_img_file, args.output_path, args.subject, rpt_sect,
+            pet_data_input_file, args.output_path, args.subject, rpt_sect,
             ignored_volumes=args.ignore_frames,
             highest_volume=args.latest_usable_volume,
             logger=logger
         )
+        sidecar_filename = pet_data_input_file.name.replace(".nii.gz", ".json")
+        if (pet_data_input_file.parent / sidecar_filename).exists():
+            pet_metadata_input_file = pet_data_input_file.parent / sidecar_filename
+            pet_metadata = json.loads(pet_metadata_input_file.read_text())
+            metadata_units = pet_metadata["Units"]  # "Bq/mL" in ds004513
+            if args.pet_units is None:
+                results.input_pet_units = metadata_units
+            elif args.pet_units == metadata_units:
+                results.input_pet_units = metadata_units
+            else:
+                # Conflicting units
+                logger.warning(f"WARNING!!! "
+                               f"The json sidecar '{sidecar_filename}' "
+                               f"specifies '{metadata_units}' units, "
+                               f"but the command line option "
+                               f"'--pet-units {args.pet_units}' was also "
+                               "specified. Using the command line option.")
+                results.input_pet_units = args.pet_units
 
     # Older FDG data are saved as one Analyze volume per time point.
     # Newer data are saved as a single 4D nifti image.
@@ -589,6 +645,7 @@ def gather_data(results):
 
     if volumes is None:
         logger.error("Failed to load PET image data")
+        logger.error("Try specifying a 4D image with the --pet-file option.")
         ok_to_run = False
     if not ok_to_run:
         logger.error("Unable to find sufficient data to run STARE.\n"
@@ -604,6 +661,8 @@ def gather_data(results):
     nib.save(mean_image,
              args.output_path / f"sub-{args.subject}_orig_mean.nii.gz")
 
+    # By this point, we should have a combined 4D image of PET data
+    # with all volumes and slices included.
     # Handle ignored frames, keeping both an original and a modified
     vols_to_skip = [
         i for i in range(combined_image.shape[3])
@@ -651,7 +710,11 @@ def gather_data(results):
     #                    for i in range(cropped_image.shape[3])]
 
     # PET data should be in units of 'mCi'
-    mci_image = image_in_millicuries(cropped_image, args.pet_units)
+    # TODO: Check a json and the arguments, compare them against each other. Make assumptions if necessary.
+
+    mci_image = image_in_millicuries(
+        cropped_image, results.input_pet_units, logger=logger
+    )
     mean_mci_image = nib.nifti1.Nifti1Image(
         np.mean(mci_image.get_fdata(), axis=3),
         affine=mci_image.affine,
@@ -663,7 +726,7 @@ def gather_data(results):
     # Store the relevant data to results object.
     results.input_4D = combined_image
     results.cropped_4D = mci_image
-    results.volume_images = volumes
+    results.volume_images = volumes  # necessary because petpvc operates per volume
 
     rpt_sect.end()
     results.write_report()
