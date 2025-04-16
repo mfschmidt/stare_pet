@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from .util import characterize_mid_times
 
 
@@ -10,6 +11,8 @@ class TimeActivityCurve:
                  activity,
                  timepoints,
                  source,
+                 activity_units=None,
+                 time_units=None,
                  missing_timepoints=None,
                  sd=None,
                  name=None, ):
@@ -23,6 +26,20 @@ class TimeActivityCurve:
         self.timepoints = np.asarray([
             round(t, 3) for t in timepoints
         ])  # ndarray shaped ~ (1000000, )
+        if activity_units is not None:
+            self.activity_units = activity_units
+        else:
+            self.activity_units = "Beq"
+        if time_units is not None:
+            self.time_units = time_units
+        else:
+            # A very short PET scan is 5 minutes, or 300 seconds
+            # A very long PET scan is 180 minutes, or 10800 seconds
+            # So we assume t<250 must be in minutes, t>250 in seconds
+            if max(timepoints) < 250:
+                self.time_units = "min"
+            else:
+                self.time_units = "sec"
         self.sd = None if sd is None else np.asarray(sd)  # ndarray ~ (25,)
         self.source = source  # where did this centroid come from
         self.name = name  # what I should call this TAC in a figure legend
@@ -58,7 +75,9 @@ class TimeActivityCurve:
         d = {
             "name": self.name,
             "timepoints": self.timepoints,
+            "time_units": self.time_units,
             "activity": self.activity,
+            "activity_units": self.activity_units,
             "source": self.source,
             "peak_index": self.peak_index,
             "peak_value": self.peak_value,
@@ -73,6 +92,8 @@ class TimeActivityCurve:
                     d[f"feature_{f}_{k}"] = v
             elif isinstance(self.features[f], np.ndarray):
                 pass  # skip arrays, they don't need to get saved to dataframes
+            elif isinstance(self.features[f], pd.DataFrame):
+                pass  # skip dataframes, they don't need to get saved into dataframes
             else:
                 d[f"feature_{f}"] = self.features[f]
         return d
