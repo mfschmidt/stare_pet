@@ -320,6 +320,12 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
 
     # Handle different types of data we may receive
     data = prep_data(data)
+    if data['t'].max() < 250.0:
+        early_late_threshold = 5.0
+        x_label = "Time (minutes)"
+    else:
+        early_late_threshold = 300.0
+        x_label = "Time (seconds)"
 
     # Force seaborn to treat K as categorical rather than continuous
     data.loc[:, 'K'] = data['k'].apply(
@@ -337,10 +343,10 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
     for i, ax in enumerate(axes):
         # Determine which time ranges are included in each axes
         if i == 2:
-            t_filter = data['t'] >= 5.0
+            t_filter = data['t'] >= early_late_threshold
             do_legend = False
         elif i == 1:
-            t_filter = data['t'] <= 5.0
+            t_filter = data['t'] <= early_late_threshold
             do_legend = False
         else:
             t_filter = [True, ] * len(data)
@@ -394,7 +400,7 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
         #              label=f"Best (k-{best_k:02d}-{best_label:02d})", ax=ax)
 
         # Finish off the details so the plot is readable.
-        ax.set_xlabel("Minutes")  # ranges 0 to 60
+        ax.set_xlabel(x_label)  # ranges 0 to 60
 
     ax_early.set_ylabel("Activity in mCi/cc")  # ranges -0.05 to +2.00
     ax_late.set_ylabel("Activity in mCi/cc")  # ranges typically -0.05 to +0.30
@@ -1347,3 +1353,43 @@ def plot_pca_variance(pca_transformer, title="", save_as=None):
     if save_as is not None:
         fig_var_exp.savefig(save_as)
     return fig_var_exp
+
+
+def plot_confetti_score_on_mask_z(data, name=""):
+    fig_weights, axes_weights = plt.subplots(
+        ncols=3, figsize=(4, 7), layout='tight'
+    )
+
+    wt_ax = axes_weights[0]
+    sns.lineplot(data=data[data['var'] == 'weight'], x='val', y='z', orient="y",
+                 ax=wt_ax)
+    wt_ax.set_xlabel('weight')
+    wt_ax.set_xticks([0.0, ])
+    wt_ax.set_xticklabels(['0', ])
+
+    score_ax = axes_weights[1]
+    scatter_data = data[(data['var'] == 'score') & (data['valence'] != 'neutral')]
+    sns.scatterplot(data=scatter_data, x='val', y='z',
+                    hue='valence', palette={'positive': 'green', 'negative': 'red', 'neutral': 'gray', },
+                    legend=False,
+                    ax=score_ax)
+    score_ax.set_xticks([0.0, ])
+    score_ax.set_xticklabels(['0', ])
+    score_ax.set_yticklabels([])
+    score_ax.set_ylabel('')
+    score_ax.set_ylim(wt_ax.get_ylim())
+    score_ax.set_xlabel('score')
+
+    bar_ax = axes_weights[2]
+    sns.barplot(data=data[data['var'] == 'ratio'], x='val', y='z', orient="y",
+                order=data[data['var'] == 'ratio']['z'][::-1],
+                ax=bar_ax)
+    bar_ax.set_xticks([])
+    bar_ax.set_xticklabels([])
+    bar_ax.set_yticklabels([])
+    bar_ax.set_ylabel('')
+    bar_ax.set_xlabel('mask')
+
+    fig_weights.suptitle(name)
+
+    return fig_weights, axes_weights
