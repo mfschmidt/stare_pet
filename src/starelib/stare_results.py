@@ -28,6 +28,8 @@ class StareResults(Results):
         self.cropped_4D = None
         self.volume_files = []
         self.region_weights = None
+        self.input_pet_units = None
+        self.input_time_units = None
 
         # Data from two-step clustering
         self.cluster_centroids = {1: [], 2: [], }  # contains best TAC so far
