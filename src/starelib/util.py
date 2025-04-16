@@ -271,20 +271,39 @@ def characterize_mid_times(mid_times, missing_mid_times=None, beginning=0.0):
     return pd.DataFrame(rows)
 
 
-def image_in_millicuries(image, units):
+def image_in_millicuries(image, units, logger=None):
     """ Return an image in millicuries from existing units.
 
         :param Nifti1Image image: The current image
         :param str units: The current image's units
+        :param logging.logger logger: A stream to output a warning
+        :returns nib.nifti2.Nifti2Image: An image in mCi
     """
+
+    logger = logging.getLogger("STARE") if logger is None else logger
 
     # If they already are in millicuries, good,
     # but other units get converted here.
-    if units.lower() == "kbq":
+    # "Bq/mL" in ds004513 autosampler json, "Units: Bq/mL, InjectedRadioactivityUnits: MBq" in pet.json
+    if units.lower() == "mci":
+        logger.info("PET image is already in mCi.")
+        return image
+    elif units.lower() == "mbq":
+        logger.info("PET image in MBq being converted to mCi (/37).")
+        return nilearn.image.math_img('a / 37', a=image)
+    elif units.lower() == "kbq":
+        logger.info("PET image in kBq being converted to mCi (/37,000).")
         return nilearn.image.math_img('a / 37000', a=image)
     elif units.lower() == "bq":
+        logger.info("PET image in Bq being converted to mCi (/37,000,000).")
         return nilearn.image.math_img('a / 37000000', a=image)
     else:
+        warning_message = (
+            f"PET image is in {units} units, which I don't understand. "
+            "Assuming the default, 'mCi'. Please use  "
+            "'--pet-units [mCi, mBq, kBq, Bq]' (case-insensitive) "
+            "to specify different units.")
+        logger.warning(warning_message)
         return image
 
 
@@ -707,6 +726,35 @@ def get_s_i_axis(img_shape, img_affine):
             return ax, 1
         elif world_coords[ax] == max_z:
             return ax, -1
+
+
+def get_s_i_density(image, mask=None):
+    """
+
+    :return:
+    """
+
+    # All centroids were from the same image; which axis points inferiorly?
+    ax, direction = get_s_i_axis(image.shape[:3], image.affine)
+
+    # If mask is not provided, calculate density of original image
+    if mask is None:
+        mask = image.get_fdata()
+
+    # Collapse axes of the centroid to determine how heavily a single
+    # slice is represented by this cluster mask in each dimension
+    # Figure out the density of voxels in each slice, inf to sup
+    if ax == 2:
+        # feature_name = 'k_density'
+        density = np.sum(np.sum(mask, axis=0), axis=0)
+    elif ax == 1:
+        # feature_name = 'j_density'
+        density = np.sum(np.sum(mask, axis=0), axis=1)
+    else:  # ax == 0
+        # feature_name = 'i_density'
+        density = np.sum(np.sum(mask, axis=1), axis=1)
+
+    return density
 
 
 def write_fsl_script(
