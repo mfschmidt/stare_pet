@@ -51,7 +51,15 @@ def get_argument_parser():
         help="Fast local storage for caching interim data",
     )
     parser.add_argument(
+        "--pet-file", type=Path, default=None,
+        help="Override searching through input-path with a specific file",
+    )
+    parser.add_argument(
         "--tac-file", type=Path, default=None,
+        help="Override searching through input-path with a specific file",
+    )
+    parser.add_argument(
+        "--plasma-file", type=Path, default=None,
         help="Override searching through input-path with a specific file",
     )
     parser.add_argument(
