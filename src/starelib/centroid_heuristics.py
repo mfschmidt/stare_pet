@@ -7,11 +7,12 @@ import nilearn as nil
 from nibabel import affines
 from scipy.ndimage import center_of_mass
 from scipy.spatial import distance
+from nilearn.image import coord_transform
 
 from .centroid import Centroid
 from .mp_queues import run_in_mp_queue
 from .util import (
-    dice_coef, flatten_4d_to_2d, reshape_labels_to_3d, get_s_i_axis
+    dice_coef, flatten_4d_to_2d, reshape_labels_to_3d, get_s_i_axis, get_s_i_density
 )
 
 
@@ -180,8 +181,11 @@ def calculate_sparsity(centroids, threshold=95):
                 break
 
 
-def calculate_axis_weights(mask, pet_img):
-    """ How heavily weighted are the cluster masks along x, y, z axes?
+def calculate_old_confetti_score(mask, pet_img):
+    """ Score how likely the mask is to represent confetti-like clusters.
+
+        A positive score indicates a high likelihood of confetti-like clusters.
+        A negative score indicates a low likelihood of confetti-like clusters.
 
         :param mask: A 3D-shaped cluster mask
         :param pet_img: Nifti PET image for shape and affine, not data
@@ -189,19 +193,7 @@ def calculate_axis_weights(mask, pet_img):
 
     # All centroids were from the same image; which axis points inferiorly?
     ax, direction = get_s_i_axis(pet_img.shape[:3], pet_img.affine)
-
-    # Collapse axes of the centroid to determine how heavily a single
-    # slice is represented by this cluster mask in each dimension
-    # Figure out the density of voxels in each slice, inf to sup
-    if ax == 2:
-        # feature_name = 'k_density'
-        density = np.sum(np.sum(mask, axis=0), axis=0)
-    elif ax == 1:
-        # feature_name = 'j_density'
-        density = np.sum(np.sum(mask, axis=0), axis=1)
-    else:  # ax == 0
-        # feature_name = 'i_density'
-        density = np.sum(np.sum(mask, axis=1), axis=1)
+    density = get_s_i_density(pet_img, mask)
     ratios = density / np.sum(density)
 
     # Calculate a score to indicate the cluster is dominated by neck noise.
@@ -223,6 +215,108 @@ def calculate_axis_weights(mask, pet_img):
     # indicate very heavy influence of voxels in the bottom-most slice.
     # A good cluster will probably have a negative score.
     return np.sum(ratios * weights)
+
+
+## Experimental modifications of the above
+def calculate_confetti_score(mask, pet_img):
+    """ Score how likely the mask is to represent confetti-like clusters.
+
+        A positive score indicates a high likelihood of confetti-like clusters.
+        A negative score indicates a low likelihood of confetti-like clusters.
+
+        :param mask: A 3D-shaped cluster mask
+        :param pet_img: Nifti PET image for shape and affine, not data
+    """
+
+    # All centroids were from the same image; which axis points inferiorly?
+    axis, direction = get_s_i_axis(pet_img.shape[:3], pet_img.affine)
+    density = get_s_i_density(pet_img, mask)
+    ratios = density / np.sum(density)
+    com_vox = center_of_mass(pet_img.get_fdata())
+    com_world = coord_transform(*com_vox, pet_img.affine)
+    # print(f"Center of mass in world space: [{com_world[0]:.1f}, {com_world[1]:.1f}, {com_world[2]:.1f}]")
+    # print(f"Center of mass in voxel space: [{com_vox[0]:.1f}, {com_vox[1]:.1f}, {com_vox[2]:.1f}]")
+
+    # This weight scheme was calibrated to maximize the confetti-like
+    # clusters in CerePET scans to be >0 and the good clusters to be <0
+    # It is based on empirical manual measurements of where good clusters
+    # lie along the z axis and where noise typically starts in CerePET images.
+    # The top of the superior sagittal sinus (and brain) is 53-70 slices (63.6-84.0mm) above the COM
+    # The bottom of the transverse sinus is up to 28 slices (33.6mm) below the COM.
+    # Vascular clusters are very likely to be in this range,
+    # and confetti is not, so include slices liberally, and penalize it strongly.
+    hi_vasc_z = com_world[axis] + 84.0  # mm, world space
+    lo_vasc_z = com_world[axis] - 33.6  # mm, world space
+    # print(f"Vasc range in world space: [{lo_vasc_z:.1f}, {hi_vasc_z:.1f}]")
+    hi_vasc_z = int(coord_transform(0, 0, hi_vasc_z, np.linalg.inv(pet_img.affine))[axis])
+    lo_vasc_z = int(coord_transform(0, 0, lo_vasc_z, np.linalg.inv(pet_img.affine))[axis])
+    # print(f"Vasc range in voxel space: [{lo_vasc_z}, {hi_vasc_z}]")
+
+    # Confetti noise is pretty universal in the lower 12 slices, regardless of
+    # positioning. And it's common in 44.6 to 84.9 slices (53.5-101.9mm) below the COM. Because
+    # inferior slices may still contain carotid artery or jugular vein, and
+    # because this noise may co-occur in a mask that also contains vascular
+    # clusters, we are more conservative with inclusion, and less punitive
+    # with scoring. We also use a gradient to score more inferior slices more
+    # heavily. We will additively penalize voxels in the cluster for being below
+    # each of the three thresholds below, so the bottom slice usually gets a triple whammy.
+    hi_confetti_slice = 10  # scaled back from 12 to stay conservative
+    universal_noise_z = int(coord_transform(0, 0, hi_confetti_slice, pet_img.affine)[axis])
+    # print(f"Absolute noise range below {hi_confetti_slice} slices, {universal_noise_z:.1f}mm")
+    sup_noise_z = com_world[axis] - 31.9
+    inf_noise_z = com_world[axis] - 67.7
+    # print(f"Noise range in world space: weak below {sup_noise_z:.1f}, strong below {inf_noise_z:.1f}")
+    sup_noise_z = int(coord_transform(0, 0, sup_noise_z, np.linalg.inv(pet_img.affine))[axis])
+    inf_noise_z = int(coord_transform(0, 0, inf_noise_z, np.linalg.inv(pet_img.affine))[axis])
+    # print(f"Noise range in voxel space: weak below {sup_noise_z:.1f}, strong below {inf_noise_z:.1f}")
+
+    # Construct a confetti score mask from low neck to above the head
+    df_rows = list()
+    weights = np.zeros(len(ratios))
+    for i in range(len(weights)):
+    # Check both directions because S+ encoding not 100% certain.
+        if direction > 0.0:  # inferior to superior
+            # start, stop = 0.0, len(density)
+            if hi_vasc_z >= i >= lo_vasc_z:
+                weights[i] -= 5.0
+            if i < sup_noise_z:
+                weights[i] += 0.5
+            if i < inf_noise_z:
+                weights[i] += 1.0
+            if i < universal_noise_z:
+                weights[i] += 1.0
+        else:  # superior to inferior, unlikely
+            # start, stop = len(density), 0.0
+            if hi_vasc_z <= i <= lo_vasc_z:
+                weights[i] -= 5.0
+            if i > sup_noise_z:
+                weights[i] += 0.5
+            if i > inf_noise_z:
+                weights[i] += 1.0
+            if i > universal_noise_z:
+                weights[i] += 1.0
+        valence = 'neutral'
+        score = ratios[i] * weights[i]
+        if score > 0.0:
+            valence = 'positive'
+        elif score < 0.0:
+            valence = 'negative'
+        df_rows.append({'z': i, 'var': 'weight', 'val': weights[i], 'valence': valence})
+        df_rows.append({'z': i, 'var': 'ratio', 'val': ratios[i], 'valence': valence})
+        df_rows.append({'z': i, 'var': 'score', 'val': score, 'valence': valence})
+
+    plottable_data = pd.DataFrame(df_rows)
+
+    # These weights add the proportion of voxels in the lowest slices,
+    # and penalize everything in head space. So a score of 1.0 would
+    # indicate very heavy influence of voxels in the bottom-most slice.
+    # A good cluster will probably have a negative score.
+    return {
+        'ratios': ratios,
+        'weights': weights,
+        'score': np.sum(ratios * weights),
+        'data': plottable_data,
+    }
 
 
 def calculate_spatial_info(centroids, step, logger, num_cpus=-1):
@@ -337,7 +431,6 @@ def k_means_worker(arg_tuple):
 def find_centroids(
         pet_4d_img,
         ks,
-        features,
         mid_times=None,
         num_cpus=1,
         verbose=0,
@@ -392,11 +485,6 @@ def find_centroids(
         k = kmeans_result['k']
         k_means_fits[k] = kmeans_result['k_means']
 
-        # Make a place to store counts while we look through clusters
-        feature_counts = {"total": 0}
-        for feature_label in features.keys():
-            feature_counts[feature_label] = 0
-
         # Go through clusters, creating a centroid object for each one.
         for i in range(k):
             cc = kmeans_result['k_means'].cluster_centers_[i]
@@ -415,25 +503,24 @@ def find_centroids(
                 # blob_count=len(blob_ids),
                 # voxels_per_blob=np.mean(voxel_counts),
             )
-            this_centroid.features = {}
+            this_centroid.features = dict()
 
-            # Count features for reporting and
-            # Save features of this centroid, like whether it is
-            # noise, vascular, peripheral, etc. using functions provided.
-            for feature_label, fxn in features.items():
-                this_centroid.features[feature_label] = fxn(this_centroid)
-                if this_centroid.features[feature_label]:
-                    feature_counts[feature_label] += 1
-            feature_counts["total"] += 1
+            this_centroid.features["likely_noise"] = likely_noise(this_centroid)
+            this_centroid.features["likely_irreversible"] = likely_irreversible(this_centroid)
+            this_centroid.features["likely_irreversible_linear"] = likely_irreversible_linear(this_centroid)
+            this_centroid.features["likely_background"] = likely_background(this_centroid)
+            this_centroid.features["likely_vascular"] = likely_vascular(this_centroid)
 
             # Add confetti score feature
             mask_3d = reshape_labels_to_3d(
                 np.array(kmeans_result['k_means'].labels_ == i, dtype=np.uint8),
                 pet_mean_img.shape,
             )  # TODO: Cache the 3D and 2D versions of this someplace to avoid reordering them. This takes way too long, especially in debug!
-            this_centroid.features["confetti_score"] = calculate_axis_weights(
-                mask_3d, pet_4d_img
+            confetti_dict = calculate_confetti_score(
+                mask_3d, pet_mean_img
             )
+            this_centroid.features["confetti_data"] = confetti_dict['data']
+            this_centroid.features["confetti_score"] = confetti_dict['score']
             this_centroid.features['likely_confetti'] = \
                 this_centroid.features['confetti_score'] > 0.0
 
@@ -453,20 +540,11 @@ def find_centroids(
             this_centroid.features["com_shift"] = distance.euclidean(
                 pet_world_com, world_com
             )
-            feature_counts["total"] += 12
 
             # If used, clear the huge labels matrix to avoid duplicating info
             # this_centroid.labels = None
 
             all_centroids.append(this_centroid)
-
-        if verbose:
-            for label, count in feature_counts.items():
-                if label != "total":
-                    kmeans_result['log_messages'].append(
-                        f"  {count:03d} / "
-                        f"{feature_counts['total']:03d} are {label}"
-                    )
 
         # Rather than logging them out of order, we pool all messages from
         # a given k, hold them, and we emit them all in one chunk here.
@@ -518,9 +596,22 @@ def label_best_centroid(centroids, best_label="best_overall", keep_confetti=Fals
         best_centroid.best_in_k = True
 
     elif best_label == 'best_overall':
+        # Do an additional filter on 'likely_vascular' criteria
+        # to exclude peaks later than 10 minutes, a very conservative threshold
+        early_peaking_centroids = list()
+        for c in centroids:
+            if c.time_units.lower().startswith("s"):
+                time_threshold = 600
+            else:
+                time_threshold = 10
+            if c.timepoints[c.peak_index] < time_threshold:
+                early_peaking_centroids.append(c)
+            else:
+                logger.info(f"Centroid {c.name} excluded for peaking too late "
+                            f"({c.activity[c.peak_index]:0.2f} @ "
+                            f"t={c.timepoints[c.peak_index]:0.1f} c.time_units)")
         top_indices, top_frequencies = np.unique(
-            [c.peak_index for c in centroids
-             if (c.timepoints[c.peak_index] < 10)],  # assuming minutes, should check
+            [c.peak_index for c in early_peaking_centroids],
             return_counts=True
         )
         logger.debug("Selecting best centroid of all best-in-k centroids:")
@@ -583,17 +674,9 @@ def find_vascular_centroids(
     logger = logging.getLogger("STARE") if logger is None else logger
 
     # Run k-means, and label centroids with features
-    vascular_features = {
-        "likely_noise": likely_noise,
-        "likely_irreversible": likely_irreversible,
-        "likely_irreversible_linear": likely_irreversible_linear,
-        "likely_vascular": likely_vascular,
-        "likely_background": likely_background,
-    }
     all_centroids, k_means_fits = find_centroids(
         pet_4d_img,
         ks,
-        vascular_features,
         mid_times=mid_times,
         num_cpus=num_cpus,
         verbose=verbose,
@@ -916,15 +999,9 @@ def find_peripheral_centroids(
 
     logger = logging.getLogger("STARE") if logger is None else logger
 
-    vascular_features = {
-        "likely_noise": likely_noise,
-        "likely_irreversible": likely_irreversible,
-        "likely_vascular": likely_vascular,
-    }
     all_centroids, k_means_fits = find_centroids(
         pet_4d_img,
         ks,
-        vascular_features,
         mid_times=mid_times,
         num_cpus=num_cpus,
         verbose=verbose,
