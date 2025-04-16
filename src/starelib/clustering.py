@@ -17,8 +17,10 @@ from .util import (
 )
 from .util import from_cache, to_cache
 from .centroid import Centroid
-from .plotting import tacs_to_plottable_dataframe, plot_vascular_tacs
-from .plotting import plot_top_centroids_atlas
+from .plotting import (
+    tacs_to_plottable_dataframe, plot_vascular_tacs,
+    plot_top_centroids_atlas, plot_confetti_score_on_mask_z
+)
 from .centroid_heuristics import (
     find_vascular_centroids, likely_irreversible_linear,
     consider_alternate_clusters, calculate_spatial_info,
@@ -179,6 +181,16 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                 resample_to=resample_to_template,
                 logger=logger,
             )
+            if "confetti_data" in centroid.features:
+                if centroid.features.get("confetti_score", None) is None:
+                    title = f"{centroid.name} (no score)"
+                else:
+                    title = f"{centroid.name}, {centroid.features.get('confetti_score'):0.2f}"
+                fig_confetti, axes_confetti = plot_confetti_score_on_mask_z(
+                    centroid.features.get("confetti_data", None), name=title,
+                )
+                fig_file = f"cluster_k-{centroid.k:02d}_label-{centroid.label:02d}_confetti_scores.png"
+                fig_confetti.savefig(this_mask_path / fig_file)
             background_template = current_template
             if resample_to_template is not None:
                 background_template = resample_to_template
@@ -735,6 +747,8 @@ def two_step_cluster(results):
 
     # Just for debug/curiosity, we can also cluster via PCA and ICA.
     # This just saves some component maps, doesn't affect anything else.
+    pre_pcic_timestamp = datetime.now()
+    logger.info(f"Started PCA/ICA at {pre_pcic_timestamp}")
     if results.args.decompose_components:
         decompose_components(results, logger)
 
