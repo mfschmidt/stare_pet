@@ -4,7 +4,10 @@ import nibabel as nib
 import numpy as np
 import pickle
 
-from .util import StareVolume, combine_volumes_into_4d, flatten_4d_to_2d
+from .util import (
+    StareVolume, combine_volumes_into_4d, flatten_4d_to_2d,
+    image_in_millicuries
+)
 from .timeactivitycurve import TimeActivityCurve
 from .plotting import tacs_to_plottable_dataframe, plot_detailed_tacs
 
@@ -74,11 +77,9 @@ def correct_partial_volumes(results):
 
     # PET data should be in units of 'mCi'
     # If they already are, good, but other units get converted here.
-    pet_4d_data = combined_image.get_fdata()
-    if results.args.pet_units.lower() == "kbq":
-        pet_4d_data = pet_4d_data / 37000
-    elif results.args.pet_units.lower() == "bq":
-        pet_4d_data = pet_4d_data / 37000000
+    pet_4d_data = image_in_millicuries(
+        combined_image, results.input_pet_units, logger=logger
+    ).get_fdata()
 
     reshaped_pvc_data = flatten_4d_to_2d(pet_4d_data)
 

@@ -67,8 +67,8 @@ def get_argument_parser():
         help="Axial slices to clip.",
     )
     parser.add_argument(
-        "-u", "--pet-units", type=str, default='kBq',
-        help="PET Units, default to 'kBq'.",
+        "-u", "--pet-units", type=str, default='',
+        help="PET Units, defaults to 'kBq'.",
     )
     parser.add_argument(
         "-t", "--time-units", type=str, default='min',

@@ -594,16 +594,17 @@ def gather_data(results):
         if (pet_data_input_file.parent / sidecar_filename).exists():
             pet_metadata_input_file = pet_data_input_file.parent / sidecar_filename
             pet_metadata = json.loads(pet_metadata_input_file.read_text())
-            metadata_units = pet_metadata["Units"]  # "Bq/mL" in ds004513
             if args.pet_units is None:
-                results.input_pet_units = metadata_units
-            elif args.pet_units == metadata_units:
-                results.input_pet_units = metadata_units
+                results.input_pet_units = pet_metadata['Units']  # "Bq/mL" in ds004513
+            elif args.pet_units == '':
+                results.input_pet_units = pet_metadata['Units']
+            elif args.pet_units == pet_metadata['Units']:
+                results.input_pet_units = pet_metadata['Units']
             else:
-                # Conflicting units
+                # Conflicting units - trust the user and override
                 logger.warning(f"WARNING!!! "
                                f"The json sidecar '{sidecar_filename}' "
-                               f"specifies '{metadata_units}' units, "
+                               f"specifies '{pet_metadata['Units']}' units, "
                                f"but the command line option "
                                f"'--pet-units {args.pet_units}' was also "
                                "specified. Using the command line option.")
@@ -710,8 +711,11 @@ def gather_data(results):
     #                    for i in range(cropped_image.shape[3])]
 
     # PET data should be in units of 'mCi'
-    # TODO: Check a json and the arguments, compare them against each other. Make assumptions if necessary.
-
+    if results.input_pet_units is None:
+        if args.pet_units is None or args.pet_units == '':
+            results.input_pet_units = 'kBq'
+        else:
+            results.input_pet_units = args.pet_units
     mci_image = image_in_millicuries(
         cropped_image, results.input_pet_units, logger=logger
     )
