@@ -1373,6 +1373,11 @@ def plot_confetti_score_on_mask_z(data, name=""):
                     hue='valence', palette={'positive': 'green', 'negative': 'red', 'neutral': 'gray', },
                     legend=False,
                     ax=score_ax)
+    neg_sum = scatter_data[scatter_data['val'] < 0]['val'].sum()
+    pos_sum = scatter_data[scatter_data['val'] > 0]['val'].sum()
+    equation = f"{neg_sum:0.2f}\n+\n{pos_sum:0.2f}\n=\n{neg_sum + pos_sum:0.2f}"
+    score_ax.text(0.50, 0.99, equation, ha='center', va='top',
+                  transform=score_ax.transAxes)
     score_ax.set_xticks([0.0, ])
     score_ax.set_xticklabels(['0', ])
     score_ax.set_yticklabels([])
