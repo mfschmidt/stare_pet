@@ -4,6 +4,7 @@ from datetime import datetime
 from sklearn.cluster import KMeans
 import pandas as pd
 import nilearn as nil
+import nibabel as nib
 from nibabel import affines
 from scipy.ndimage import center_of_mass
 from scipy.spatial import distance
@@ -12,7 +13,8 @@ from nilearn.image import coord_transform
 from .centroid import Centroid
 from .mp_queues import run_in_mp_queue
 from .util import (
-    dice_coef, flatten_4d_to_2d, reshape_labels_to_3d, get_s_i_axis, get_s_i_density
+    dice_coef, flatten_4d_to_2d, unflatten_2d_to_4d, reshape_labels_to_3d,
+    get_s_i_axis, get_s_i_density
 )
 
 
@@ -430,6 +432,7 @@ def k_means_worker(arg_tuple):
 
 def find_centroids(
         pet_4d_img,
+        mask_img,
         ks,
         mid_times=None,
         num_cpus=1,
@@ -444,8 +447,8 @@ def find_centroids(
     cluster.
 
     :param ndarray pet_4d_img: Nifti with 3D Array of timeseries, 4D overall
+    :param ndarray mask_img: Nifti with 3D Array of bool to mask pet_4d_img
     :param iterable ks: Iterable of integers, each used as a k in k-means
-    :param features: A dict of functions to assign features to centroids
     :param iterable mid_times: will be stored alongside activity in TACs
     :param num_cpus: How many CPUs to deploy on multiprocessing
     :param int verbose: Set non-zero to increase logging, higher is more
@@ -454,21 +457,41 @@ def find_centroids(
 
     :returns tuple: The best TAC, and all the TACs
     """
-
+    # TODO: the mask already IS the masked 4D data; we could just use it. Or we could redo these calculations on a proper boolean mask; Maybe just do it how we used to, but provide the original 4D for COM calculations
     logger = logging.getLogger("STARE") if logger is None else logger
     logger.info(f"Setting up {len(ks)} K-means values across {num_cpus} cpus.")
 
     # Do k-means clustering of timeseries for many values of k
     # from Matlab vascClust.m:112:158
     pre_k_timestamp = datetime.now()
+    # For step one, there's no mask, just the whole image.
+    # For step two, we mask in only the step one data.
+
     list_of_args = []
-    for k in ks:
-        list_of_args.append(
-            (f"k {k}", k, flatten_4d_to_2d(pet_4d_img.get_fdata(), zxy=True),
-             random_seed, verbose)
+    # We have a full image and a mask, cluster with masked data
+    if mask_img is None:
+        clusterable_data = flatten_4d_to_2d(pet_4d_img.get_fdata(), zxy=True)
+    else:
+        logger.info(f"masking {pet_4d_img.shape} PET data by {mask_img.shape} mask")
+        mask = np.sum(flatten_4d_to_2d(mask_img.get_fdata().astype(bool), zxy=True), axis=1).astype(bool)
+        pet_2d_data = flatten_4d_to_2d(pet_4d_img.get_fdata(), zxy=True)
+        best_centroid_masked_data = np.zeros(pet_2d_data.shape)
+        best_centroid_masked_data[mask] = pet_2d_data[mask, :]
+        img_to_cluster = nib.nifti1.Nifti1Image(
+            unflatten_2d_to_4d(
+                best_centroid_masked_data,
+                pet_4d_img.shape
+            ),
+            affine=pet_4d_img.affine,
+        )
+        clusterable_data = flatten_4d_to_2d(
+            img_to_cluster.get_fdata(), zxy=True,
         )
     # Run each tuple of arguments in a separate process to save time.
-
+    for k in ks:
+        list_of_args.append(
+            (f"k {k}", k, clusterable_data, random_seed, verbose)
+        )
     k_means_results = run_in_mp_queue(
         k_means_worker, list_of_args, num_cpus, logger
     )
@@ -645,6 +668,7 @@ def label_best_centroid(centroids, best_label="best_overall", keep_confetti=Fals
 
 def find_vascular_centroids(
         pet_4d_img,
+        mask_img,
         ks,
         step,
         mid_times=None,
@@ -660,6 +684,7 @@ def find_vascular_centroids(
     cluster.
 
     :param ndarray pet_4d_img: Nifti with 3D array of timeseries, 4D overall
+    :param ndarray mask_img: Nifti with 3D array of zero/non-zero values
     :param iterable ks: Iterable of integers, each used as a k in k-means
     :param int step: Which step of k-means, used for labeling centroids.
     :param iterable mid_times: will be stored alongside activity in TACs
@@ -673,9 +698,10 @@ def find_vascular_centroids(
 
     logger = logging.getLogger("STARE") if logger is None else logger
 
-    # Run k-means, and label centroids with features
+    # Run k-means, and label centroids with features.
     all_centroids, k_means_fits = find_centroids(
         pet_4d_img,
+        mask_img,
         ks,
         mid_times=mid_times,
         num_cpus=num_cpus,
@@ -1001,6 +1027,7 @@ def find_peripheral_centroids(
 
     all_centroids, k_means_fits = find_centroids(
         pet_4d_img,
+        None,
         ks,
         mid_times=mid_times,
         num_cpus=num_cpus,

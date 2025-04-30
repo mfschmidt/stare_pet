@@ -176,7 +176,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
             this_mask_path.mkdir(exist_ok=True)
             atlas_nifti_file_path, mask_nifti_file_path = make_atlas_and_mask(
                 centroid, current_template,
-                labels=fits[centroid.k].labels_ + 1,
+                labels=centroid.labels if centroid.labels is not None else fits[centroid.k].labels_ + 1,
                 out_path=this_mask_path,
                 resample_to=resample_to_template,
                 logger=logger,
@@ -190,7 +190,8 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                     centroid.features.get("confetti_data", None), name=title,
                 )
                 fig_file = f"cluster_k-{centroid.k:02d}_label-{centroid.label:02d}_confetti_scores.png"
-                fig_confetti.savefig(this_mask_path / fig_file)
+                if fig_confetti is not None:
+                    fig_confetti.savefig(this_mask_path / fig_file)
             background_template = current_template
             if resample_to_template is not None:
                 background_template = resample_to_template
@@ -419,7 +420,7 @@ def post_process_clusters(
 
 
 def load_or_calculate_clusters(
-        results, cluster_function, source_4d_image, ks, step, report_section, logger=None
+        results, cluster_function, source_4d_image, mask_image, ks, step, report_section, logger=None
 ):
     """ Treat data as either 4D Nifti1Image or 2D array
 
@@ -427,6 +428,8 @@ def load_or_calculate_clusters(
         :param cluster_function: function that takes k and label as input and
         :param source_4d_image: 4D PET activity image,
             may differ from the image in results due to cropping and resampling
+        :param mask_image: 3D binary mask image,
+            for step 2 clustering, only values within the mask should be used
         :param ks: list of k values for running repeated k-means
         :param step: Which step in two-step k-means, 1 or 2
         :param report_section: Part of the report we can write to
@@ -446,7 +449,8 @@ def load_or_calculate_clusters(
     if cached_data is None:
         # Calculate the clusters via k-means with multiprocessing
         all_centroids, model_fits = cluster_function(
-            source_4d_image, ks, step,
+            source_4d_image, mask_image,
+            ks, step,
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             keep_confetti=results.args.keep_confetti_pattern,
@@ -470,6 +474,7 @@ def load_or_calculate_clusters(
         results.logger.info(f"  loaded cached step {step} k-means to save time")
 
     # Generate the masked data, with only the best centroid's data from step 1.
+    # TODO: I'm doing this several times. See if I can just cache it while finding centroids.
     best_centroid = best_of(all_centroids)
     if best_centroid.labels is None:
         best_centroid.labels = model_fits[best_centroid.k].labels_ + 1
@@ -790,7 +795,7 @@ def two_step_cluster(results):
     # -------------------------------------------------------------------------
 
     k_means_results[1] = load_or_calculate_clusters(
-        results, cluster_function, curr_4d_pet_img,
+        results, cluster_function, curr_4d_pet_img, None,
         step_one_ks, 1, rpt_sect, logger=logger
     )
     rpt_sect.add_line(str(k_means_results[1]['best_centroid']))
@@ -830,7 +835,8 @@ def two_step_cluster(results):
     # Run the second k-means, but only on the best cluster from the first.
     # If prior models were saved to disk, load them rather than running.
     k_means_results[2] = load_or_calculate_clusters(
-        results, cluster_function, k_means_results[1]['best_cluster_as_image'],
+        results, cluster_function, curr_4d_pet_img,
+        k_means_results[1]['best_cluster_as_image'],
         step_two_ks, 2, rpt_sect, logger=logger
     )
     rpt_sect.add_line(str(best_of(results.cluster_centroids[2])))
@@ -897,8 +903,10 @@ def two_step_cluster(results):
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
         # Before pickling, remove redundant copies of the huge label arrays.
+        # But note that a sparsity-reduced or overridden centroid must be kept
         for c in results.cluster_centroids[step]:
-            c.labels = None
+            if c.k != 1:
+                c.labels = None
         filename = "sub-{}_step-{}_kmeans_centroid.pkl".format(
             results.args.subject, step
         )
