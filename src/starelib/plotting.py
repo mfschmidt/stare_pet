@@ -1356,6 +1356,15 @@ def plot_pca_variance(pca_transformer, title="", save_as=None):
 
 
 def plot_confetti_score_on_mask_z(data, name=""):
+    """ Plot the positive and negative evidence a given mask is "just confetti"
+
+        :param data: A dataframe, generated as a centroid feature
+        :returns figure, axes: The plot figure and axes
+    """
+
+    if data is None:
+        return None, None
+
     fig_weights, axes_weights = plt.subplots(
         ncols=3, figsize=(4, 7), layout='tight'
     )
@@ -1363,6 +1372,7 @@ def plot_confetti_score_on_mask_z(data, name=""):
     wt_ax = axes_weights[0]
     sns.lineplot(data=data[data['var'] == 'weight'], x='val', y='z', orient="y",
                  ax=wt_ax)
+    wt_ax.axvline(x=0, color='gray', linestyle='--')
     wt_ax.set_xlabel('weight')
     wt_ax.set_xticks([0.0, ])
     wt_ax.set_xticklabels(['0', ])
@@ -1378,6 +1388,7 @@ def plot_confetti_score_on_mask_z(data, name=""):
     equation = f"{neg_sum:0.2f}\n+\n{pos_sum:0.2f}\n=\n{neg_sum + pos_sum:0.2f}"
     score_ax.text(0.50, 0.99, equation, ha='center', va='top',
                   transform=score_ax.transAxes)
+    score_ax.axvline(x=0, color='gray', linestyle='--')
     score_ax.set_xticks([0.0, ])
     score_ax.set_xticklabels(['0', ])
     score_ax.set_yticklabels([])
