@@ -1388,7 +1388,7 @@ def plot_confetti_score_on_mask_z(data, name=""):
     equation = f"{neg_sum:0.2f}\n+\n{pos_sum:0.2f}\n=\n{neg_sum + pos_sum:0.2f}"
     score_ax.text(0.50, 0.99, equation, ha='center', va='top',
                   transform=score_ax.transAxes)
-    score_ax.axvline(x=0, color='gray', linestyle='--')
+    score_ax.axvline(x=0, ymin=0, ymax=0.75, color='gray', linestyle='--')
     score_ax.set_xticks([0.0, ])
     score_ax.set_xticklabels(['0', ])
     score_ax.set_yticklabels([])
