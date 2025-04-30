@@ -4,6 +4,16 @@ with no warranty whatsoever.
 
 The following versions reflect development progress dates.
 
+Version 0.11.1, 2025-04-30
+
+- Package everything into an App object
+
+Version 0.10.16, 2025-04-29
+
+- Handle sparsity reduction of step one cluster with proper labels
+- Handle forward and reverse clip/crop/resample of override clusters
+- Plot confetti_score visuals to help debug vertical thresholds
+
 Version 0.10.4, 2024-12-29
 
 - Change neck_noise to "inf_weighted_score", and make it heavy on bottom slice

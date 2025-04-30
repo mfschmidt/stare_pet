@@ -35,4 +35,4 @@ COPY . /stare_pet
 
 RUN /venv/bin/pip install /stare_pet
 
-ENTRYPOINT ["/venv/bin/python3", "/venv/bin/stare"]
+ENTRYPOINT ["/venv/bin/python3", "/venv/bin/stare_app.py"]
