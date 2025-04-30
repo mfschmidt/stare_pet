@@ -207,7 +207,7 @@ def get_plasma(results):
         except KeyError:
             time_units = None
             activity_units = None
-        if time_units == "Bq/mL":
+        if activity_units in ('Bq/mL', 'Beq', 'kBq'):  # This is clearly wrong, but hacked to work on ds004513 temporarily
             plasma_data['plasma_radioactivity'] = plasma_data['plasma_radioactivity'] / 37000
         return TimeActivityCurve(
             activity=plasma_data['plasma_radioactivity'].values.astype(float),
