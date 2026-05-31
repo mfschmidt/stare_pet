@@ -11,8 +11,10 @@ import pickle
 from csv import Sniffer
 
 from .timeactivitycurve import TimeActivityCurve
-from .util import StareVolume, image_in_millicuries,\
+from .util import (
+    StareVolume, image_in_millicuries,
     combine_volumes_into_4d, explode_4d_into_volumes
+)
 
 
 def get_tsv_data(

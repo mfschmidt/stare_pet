@@ -6,14 +6,14 @@ from multiprocessing import cpu_count
 import warnings
 from importlib.metadata import version
 
-from starelib.stare_results import StareResults
-from starelib.loader import gather_data
-from starelib.clustering import two_step_cluster
-from starelib.partial_volume import correct_partial_volumes
-from starelib.fit_mean_tac import fit_vascular_mean_tac
-from starelib.vascular_correction import tac_vascular_correction
-from starelib.boot_anchor import boot_anchor
-from starelib.minimize_cost import minimize_parameter_cost
+from stare_pet.starelib.stare_results import StareResults
+from stare_pet.starelib.loader import gather_data
+from stare_pet.starelib.clustering import two_step_cluster
+from stare_pet.starelib.partial_volume import correct_partial_volumes
+from stare_pet.starelib.fit_mean_tac import fit_vascular_mean_tac
+from stare_pet.starelib.vascular_correction import tac_vascular_correction
+from stare_pet.starelib.boot_anchor import boot_anchor
+from stare_pet.starelib.minimize_cost import minimize_parameter_cost
 
 
 class StareApp:
@@ -379,5 +379,11 @@ class StareApp:
         # Good to continue on
         return True
 
-if __name__ == "__main__":
+
+def main():
+    """ Script entry point """
     sys.exit(StareApp().run())
+
+
+if __name__ == "__main__":
+    main()

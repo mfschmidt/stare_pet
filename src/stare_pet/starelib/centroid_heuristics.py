@@ -154,7 +154,7 @@ def calculate_k_stability(centroids, similarity_matrix):
             c1.features['matches_best'] = 0.0
 
 
-def calculate_sparsity(centroids, threshold=95):
+def unused_calculate_sparsity(centroids, threshold=95):
     """ With each centroid, calculate sparsity of blob distribution.
 
     :param centroids: List of centroids
