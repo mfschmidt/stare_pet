@@ -264,7 +264,7 @@ def clust_er176(args):
     cropped_template = cropped_image.slicer[:, :, :, 0]
 
     # PET data should be in units of 'mCi'
-    mci_image = image_in_millicuries(cropped_image, args.pet_units)
+    mci_image = image_in_millicuries(cropped_image, args.pet_units, logger=logger)
 
     # -------------------------------------------------------------------------
     # Step 1. Run two-step k-means clustering

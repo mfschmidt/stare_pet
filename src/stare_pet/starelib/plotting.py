@@ -140,41 +140,41 @@ def plot_vascular_tacs(
     data.loc[:, 'K'] = data['k'].apply(lambda k: f"{k:02d}")
 
     # Create color palettes that make all hues identical
-    num_gray_lines = len(data[data['likely_vascular']]['name'].unique())
+    num_gray_lines = len(data[data['likely_vascular'].astype(bool)]['name'].unique())
     grays = ['gray', ] * num_gray_lines
-    num_vasc_lines = len(data[data['best_in_k']]['name'].unique())
+    num_vasc_lines = len(data[data['best_in_k'].astype(bool)]['name'].unique())
     vascs = [vascular_color, ] * num_vasc_lines
 
     # Plot every non-vascular centroid as light gray to provide context.
     # These are plotted first to set them as background.
-    if draw_non_vascular and len(data[~data['likely_vascular']]) > 0:
+    if draw_non_vascular and len(data[~data['likely_vascular'].astype(bool)]) > 0:
         sns.lineplot(
-            data=data[~data['likely_vascular']], x='t', y='activity',
+            data=data[~data['likely_vascular'].astype(bool)], x='t', y='activity',
             color='gray', hue='name', alpha=0.5, linewidth=1,
             linestyle=":", legend=False, ax=axes
         )
 
     # Plot every vascular centroid as light gray to provide context.
     # These are plotted first to set them as background.
-    if len(data[data['likely_vascular']]) > 0:
+    if len(data[data['likely_vascular'].astype(bool)]) > 0:
         sns.lineplot(
-            data=data[data['likely_vascular']], x='t', y='activity',
+            data=data[data['likely_vascular'].astype(bool)], x='t', y='activity',
             hue='name', palette=grays, alpha=0.5, linewidth=1,
             legend=False, ax=axes
         )
 
     # Next, plot the centroids that are the best for their k-means group
     # print(f"DEBUG: plotting {len(data[data['best_in_k']])} TACs")
-    if len(data[data['best_in_k']]) > 1:
+    if len(data[data['best_in_k'].astype(bool)]) > 1:
         # Each line will be labelled automatically by its hue/palette
         sns.lineplot(
-            data=data[data['best_in_k']], x="t", y="activity",
+            data=data[data['best_in_k'].astype(bool)], x="t", y="activity",
             hue='name', palette=vascs, alpha=0.5, linewidth=1, ax=axes
         )
-    elif len(data[data['best_in_k']]) > 0:
+    elif len(data[data['best_in_k'].astype(bool)]) > 0:
         # This single line will not be labelled and needs help
         sns.lineplot(
-            data=data[data['best_in_k']], x="t", y="activity",
+            data=data[data['best_in_k'].astype(bool)], x="t", y="activity",
             hue='name', palette=vascs, alpha=0.5, linewidth=1,
             label=f"Best of k", ax=axes
         )
@@ -184,11 +184,11 @@ def plot_vascular_tacs(
             line.set_label(s='')
 
     # Finally, plot the very best centroid of the whole batch.
-    if len(data[data['best_overall']]) > 0:
-        best_k = data[data['best_overall']]['k'].unique()[0]
-        best_label = data[data['best_overall']]['label'].unique()[0]
+    if len(data[data['best_overall'].astype(bool)]) > 0:
+        best_k = data[data['best_overall'].astype(bool)]['k'].unique()[0]
+        best_label = data[data['best_overall'].astype(bool)]['label'].unique()[0]
         sns.lineplot(
-            data=data[data['best_overall']], x="t", y="activity",
+            data=data[data['best_overall'].astype(bool)], x="t", y="activity",
             color=highlight_color, linestyle=":", linewidth=6, alpha=0.5,
             label=f"Best overall (k-{best_k:02d}-{best_label:02d})", ax=axes
         )
@@ -291,7 +291,7 @@ def plot_top_centroids_atlas(
 
 
 def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
-                       color_filter=None, figsize=(11, 11)):
+                       color_filter=None, figsize=(11, 8)):
     """ Plot a time activity curve (TAC), in three panels
 
         Given a long-format dataframe with TACs and their metadata,
@@ -311,11 +311,11 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
 
     # Create the figure and lay out axes for three panels
     fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(nrows=7, ncols=4)
+    gs = gridspec.GridSpec(nrows=4, ncols=4)
 
-    ax_full = fig.add_subplot(gs[0:3, :])
-    ax_early = fig.add_subplot(gs[5:, :2])
-    ax_late = fig.add_subplot(gs[5:, 2:])
+    ax_full = fig.add_subplot(gs[0:2, :])
+    ax_early = fig.add_subplot(gs[2:, :2])
+    ax_late = fig.add_subplot(gs[2:, 2:])
     axes = [ax_full, ax_early, ax_late, ]
 
     # Handle different types of data we may receive
@@ -430,8 +430,10 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
     ):
         new_handles.append(handle)
         new_labels.append(label)
-    ax_full.legend(new_handles, new_labels, bbox_to_anchor=(0.50, -0.25),
-                   loc="upper center", borderaxespad=0)
+    # ax_full.legend(new_handles, new_labels, bbox_to_anchor=(0.50, -0.25),
+    #                loc="upper center", borderaxespad=0)
+    ax_full.legend(new_handles, new_labels, bbox_to_anchor=(1.0, 1.0),
+                   loc="upper right", borderaxespad=1)
 
     ax_full.set_title("Full scan")
     ax_early.set_title("Early")
@@ -439,7 +441,7 @@ def plot_detailed_tacs(data, title=None, palette=None, dashes=None,
 
     fig.suptitle(f"Optimal vascular TACs" if title is None else title)
     # Do NOT use tight_layout; it carves out extra space for the legend
-    # fig.tight_layout()
+    fig.tight_layout()
 
     return fig
 
@@ -622,9 +624,9 @@ def draw_bounds_and_peak(
     fwhm, kde_x, kde_y = get_kde_fwhm_points(
         values, num_bootstraps=num_bootstraps, stat='probability'
     )
-    xl, xc, xr = fwhm[:, 0]  # along the x axis: left, center, right
+    xl, xc, xr = fwhm[:, 0]  # along the x-axis: left, center, right
     yb = 0.0
-    yc, yt, _ = fwhm[:, 1]  # along the y axis: bottom, center, top
+    yc, yt, _ = fwhm[:, 1]  # along the y-axis: bottom, center, top
 
     if verbose:
         print(f"<in draw_bounds_and_peak> {label_prefix}: "
@@ -638,16 +640,20 @@ def draw_bounds_and_peak(
         xdata=[xl, xl, xr, xr, ],
         ydata=[yb, yc, yc, yb, ],
         color=color,
-        label=" ".join([label_prefix,
-                        f"HM {yc:0.1%} @ ({xl:0.3f} to {xr:0.3f})"]),
+        label=" ".join(
+            [label_prefix, f"HM {yc:0.1%} @ ({xl:0.3f} to {xr:0.3f})"]
+        ),
     ))
     ax.add_artist(lines.Line2D(
         xdata=[xc, xc, ],
         ydata=[yc, yt, ],
         color=color,
-        label=" ".join([label_prefix,
-                        f"Peak {yt:0.1%} @ {xc:0.3f}"]),
+        label=" ".join(
+            [label_prefix, f"Peak {yt:0.1%} @ {xc:0.3f}"]
+        ),
     ))
+    # This mean value is pretty meaningless.
+    # TODO: It would be better to plot the matching parameter from fitting the PVC-corrected centroid.
     ax.text(np.mean(values), 0.0, "*", ha="center", va="bottom", color=color)
 
 
