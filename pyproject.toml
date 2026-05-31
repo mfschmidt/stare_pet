@@ -1,0 +1,71 @@
+[build-system]
+requires = ["uv_build >= 0.11.7, <0.12.0"]
+build-backend = "uv_build"
+
+[project]
+name = "stare_pet"
+version = "0.12.1"
+description = "A python implementation of Source-to-Target Automatic Rotating Estimation (STARE)"
+readme = "README.md"
+authors = [
+    { name = "Mike Schmidt", email = "ms5713@cumc.columbia.edu" },
+    { name = "Betsy Bartlett", email = "eab2266@cumc.columbia.edu" },
+    { name = "Francesca Zanderigo", email = "fz2173@cumc.columbia.edu" },
+]
+maintainers = [
+    { name = "Mike Schmidt", email = "mikeschmidt@schmidtgracen.com" },
+]
+license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Operating System :: Linux",
+    "Environment :: Console",
+]
+keywords = ["PET", ]
+requires-python = ">=3.12"
+dependencies = [
+    "certifi",
+    "charset-normalizer",
+    "contourpy",
+    "cycler",
+    "fonttools",
+    "humanize",
+    "idna",
+    "imageio[ffmpeg]",
+    "joblib",
+    "kiwisolver",
+    "lxml",
+    "matplotlib",
+    "nibabel",
+    "nilearn",
+    "numpy",
+    "numpy-stl",
+    "packaging",
+    "pandas",
+    "pandas-stubs~=3.0.3",
+    "pillow",
+    "pyparsing",
+    "python-dateutil",
+    "pytz",
+    "pyvista[jupyter]",
+    "requests",
+    "scikit-learn",
+    "scipy",
+    "scipy-stubs~=1.17.1",
+    "seaborn",
+    "six",
+    "threadpoolctl",
+    "typing-extensions",
+    "tzdata",
+    "urllib3",
+    "vtk",
+]
+
+[project.scripts]
+stare = "stare_pet.stare_app:main"
+
+[project_urls]
+Homepage = "https://mfschmidt.github.io/stare_pet/"
+Documentation = "https://mfschmidt.github.io/stare_pet/"
+Repository = "https://github.com/mfschmidt/stare_pet/"
