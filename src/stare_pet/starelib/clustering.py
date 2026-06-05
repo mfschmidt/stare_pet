@@ -340,16 +340,14 @@ def post_process_clusters(
     # If asked, override the k-means decision. Centroids are modified in place.
     override_cluster(results, step, centroids, rpt_sect, pet_4d_img)
 
-    # If we were asked not to post-process, just pass data right back.
+    # If we were asked not to post-process (--ignore-spatial-info),
+    # just pass the centroids right back unmodified.
+    # But other flags will override this.
     if (
-            (
-                ((step == 1) and results.args.ignore_spatial_info_step_1)
-            or
-                ((step == 2) and not results.args.utilize_spatial_info_step_2)
-            )
-            and
-                # If we're reducing sparsity, we need the spatial info regardless
-                (results.args.reduce_step_one_sparsity == 0)
+            results.args.ignore_spatial_info and
+            (results.args.reduce_step_one_sparsity == 0) and
+            (not results.args.consider_alternate_step_one_cluster) and
+            (not results.args.drop_confetti_patterns_step_2)
     ):
         rpt_sect.add_line(f"  > Step {step}: Centroids were not post-processed.")
         return centroids  # untouched
@@ -506,13 +504,15 @@ def load_or_calculate_clusters(
             # If we utilize spatial info, drop the confetti patterns
             keep_confetti = not results.args.drop_confetti_patterns_step_2
         # Calculate the clusters via k-means with multiprocessing
-        all_centroids, model_fits = cluster_function(  # TODO: list to dict
+        # K-Means will get very verbose, so only turn that on for debugging.
+        verbosity_value = 1 if results.args.debug else 0
+        all_centroids, model_fits = cluster_function(
             source_4d_image, mask_image,
             ks, step,
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
             keep_confetti=keep_confetti,
-            verbose=results.args.verbose,
+            verbose=verbosity_value,
             logger=logger,
         )
 

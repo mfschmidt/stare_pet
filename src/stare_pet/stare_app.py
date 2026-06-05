@@ -254,19 +254,19 @@ class StareApp:
                  "be written to a csv file in the 'debug/' directory."
         )
         parser.add_argument(
-            "--ignore-spatial-info-step-1",
+            "--ignore-spatial-info",
             action="store_true", default=False,
-            help="By default, spatial info is used to filter step-one k-means "
-                 "clustering. Turn this on to ensure the best cluster selected "
-                 "by step-one k-means, based only on temporal information, "
-                 "is used, without considering spatial information."
-        )
-        parser.add_argument(
-            "--utilize-spatial-info-step-2",
-            action="store_true", default=False,
-            help="By default, spatial info is used to filter step-one k-means "
-                 "clusters, but not step two. Turn this on to also filter the "
-                 "step-two k-means clusters."
+            help="By default, spatial info is used to classify and remove "
+                 "step-one k-means clusters made up of only noise in inferior "
+                 "slices. Optionally, it can also be used for sparsity reduction "
+                 "or to consider alternate clusters. "
+                 "This flag can be used to turn off the calculation of spatial "
+                 "information and speed up processing slightly. This will prevent "
+                 "exclusion of vascular clusters with all noise in inferior slices. "
+                 "This flag will be overridden by --reduce-step-one-sparsity > 0, "
+                 "--consider-alternate-step-one-cluster, "
+                 "or --drop-confetti-patterns-step-2, because they all require "
+                 "spatial information."
         )
         parser.add_argument(
             "--stop-after-clustering",
