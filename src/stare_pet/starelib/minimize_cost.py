@@ -223,17 +223,18 @@ def minimize_cost_function(results, x0=None):
         # fig, axes = plot_stare_tac_fits(optimization_result)
         # fig.savefig(out_path / f"fit_tac_{region.name}_via_sa.png")
 
-    pickle.dump(
-        mp_args_list,
-        open(results.args.debug_path / "sa_args_list.pickle", "wb")
-    )
     annealer_results = run_in_mp_queue(
         worker, mp_args_list, results.args.num_cpus, results.logger
     )
-    pickle.dump(
-        annealer_results,
-        open(results.args.debug_path / "sa_results.pickle", "wb")
-    )
+    if results.args.debug and results.args.debug_path.exists():
+        pickle.dump(
+            mp_args_list,
+            open(results.args.debug_path / "sa_args_list.pickle", "wb")
+        )
+        pickle.dump(
+            annealer_results,
+            open(results.args.debug_path / "sa_results.pickle", "wb")
+        )
 
     # Save the rate constants in an accessible csv format.
     final_rate_df = package_rate_constants(
@@ -258,7 +259,7 @@ def minimize_parameter_cost(results):
     logger.info(f"Starting {results.args.subject} simulated annealing "
                 f"at {start_time}")
 
-    cache_file = f"sub-{results.args.subject}_step-5_minimized_params.pkl"
+    cache_file = f"sub-{results.args.subject}_step-5_minimized_params.pickle"
     sa_results = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -280,10 +281,10 @@ def minimize_parameter_cost(results):
     results.annealer_results = sa_results[1]
     results.final_rate_df = pd.DataFrame(sa_results[2])
 
-    if results.args.debug:
+    if results.args.debug and results.args.debug_path.exists():
         with open(
             results.args.debug_path /
-            f"sub-{results.args.subject}_step-5_results.pkl",
+            f"sub-{results.args.subject}_step-5_results.pickle",
             "wb"
         ) as f:
             pickle.dump(results, f)

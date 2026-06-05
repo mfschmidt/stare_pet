@@ -146,13 +146,13 @@ def fit_curves_mp(
         all_exp_failures.join(result['exp_failures'])
         del result['exp_failures']
         del result['tac_failures']
-    if results.args.debug:
+    if results.args.debug and results.args.debug_path.exists():
         pickle.dump(
             {
                 'tac_failures': all_tac_failures,
                 'exp_failures': all_exp_failures,
             },
-            open(results.args.debug_path / "boot_anchor_failures.pkl", "wb")
+            open(results.args.debug_path / "boot_anchor_failures.pickle", "wb")
         )
 
     results.logger.info(
@@ -468,7 +468,7 @@ def boot_anchor(results):
     # Attempt to fit each bootstrap curve to the stacked exponential decay model
     # Find all workable parameters for fitting boostrap curves to regional tacs
     # If prior curves were saved to disk, load them rather than running.
-    cache_file = f"sub-{results.args.subject}_step-4_bootstrap_curve_fits.pkl"
+    cache_file = f"sub-{results.args.subject}_step-4_bootstrap_curve_fits.pickle"
     curves_fits = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -522,8 +522,8 @@ def boot_anchor(results):
         ki_fwhm[i], _x, _y = get_kde_fwhm_points(kis[:, i])
 
     # For recursive plotting fixes:
-    if results.args.debug:
-        pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pkl"
+    if results.args.debug and results.args.debug_path.exists():
+        pickle_name = f"sub-{results.args.subject}_boot_anchor_data.pickle"
         with open(results.args.debug_path / pickle_name, "wb") as f:
             pickle.dump(
                 {
@@ -603,8 +603,8 @@ def boot_anchor(results):
         caption = f"Bootstrapped rate constant boundaries for {k_const}"
         rpt_sect.add_figure(results.args.fig_path / figure_name, caption)
 
-    if results.args.debug:
-        pickle_name = f"sub-{results.args.subject}_step-4_results.pkl"
+    if results.args.debug and results.args.debug_path.exists():
+        pickle_name = f"sub-{results.args.subject}_step-4_results.pickle"
         with open(results.args.cache_path / pickle_name, "wb") as f:
             pickle.dump(results, f)
 

@@ -116,10 +116,10 @@ def calculate_k_stability(centroids, similarity_matrix):
     """ Is a variant of the 'best' centroid found at multiple k's?
     """
 
-    unique_k_values = sorted(set([c.k for c in centroids]))
+    unique_k_values = sorted(set([c.k for c in centroids.values()]))
 
     # Let each centroid pick out its relevant coefficients and summarize them.
-    for c1 in centroids:
+    for k1, c1 in centroids.items():
         c1_idx = f"{c1.label:02d}-{c1.k:02d}"
         c1.features['stability'] = 'Not implemented'
         c1.features['overlapping'] = list()
@@ -130,7 +130,7 @@ def calculate_k_stability(centroids, similarity_matrix):
         for k in unique_k_values:
             if c1.k != k:
                 all_dices[k] = list()
-        for c2 in centroids:
+        for k2, c2 in centroids.items():
             c2_idx = f"{c2.label:02d}-{c2.k:02d}"
             dc = similarity_matrix.loc[c1_idx, c2_idx]
             if c1.k != c2.k:
@@ -328,24 +328,42 @@ def calculate_spatial_info(centroids, step, logger, num_cpus=-1):
     logger.debug(
         f"Analyzing spatial clusters for step {step}"
     )
-    centroid_tuples = [
-        (str(c), c) for c in centroids
-    ]
     # Do spatial info calculations in as many threads as we can.
     list_of_results = run_in_mp_queue(
         spatial_info_worker,
-        centroid_tuples,
+        [(str(c), c) for k, c in centroids.items()],
         num_cpus=num_cpus,
         logger=logger,
     )
     # Multi-processing works on copies of the original data, so return
     # updated data, losing our original centroids
-    returned_centroids = list()
+    centroids_with_si = dict()
     for rslt in list_of_results:
-        returned_centroids.append(rslt['c'])
+        c = rslt.get('c', None)
+        centroids_with_si[(c.k, c.label)] = c
         for msg in rslt['log_messages']:
             logger.info(msg)
-    return returned_centroids
+
+    # Separate processes cannot share memory, so we did the calculations,
+    # now we need to overwrite the vascular centroids list with the new ones
+    # and weave these new centroids into the original list.
+    num_replacements = 0
+    # For each centroid in the list passed in,
+    # there should be the same centroid in our new list, but with SI.
+    # replace it with the one containing spatial information
+    centroids.update(centroids_with_si)
+    # for ka, cent_a in centroids.items():
+    #     for kb, cent_b in centroids_with_si.items():
+    #         if (cent_a.label == cent_b.label) and (cent_a.k == cent_b.k):
+    #             # Replace the original centroid with the same one,
+    #             # but with spatial information
+    #             centroids[ka] = cent_b
+    #             num_replacements += 1
+    # logger.info(f"  > replaced {num_replacements} of {len(centroids_with_si)} "
+    #             f"vascular centroids (of {len(centroids)} total centroids).")
+
+    # Pass back the same list, but with modified contents.
+    return centroids
 
 
 def spatial_info_worker(arg_tuple):
@@ -503,7 +521,7 @@ def find_centroids(
 
     # Retrieve and organize k-means results
     k_means_fits = {}
-    all_centroids = []
+    centroids = dict()
     for kmeans_result in k_means_results:
         k = kmeans_result['k']
         k_means_fits[k] = kmeans_result['k_means']
@@ -538,7 +556,7 @@ def find_centroids(
             mask_3d = reshape_labels_to_3d(
                 np.array(kmeans_result['k_means'].labels_ == i, dtype=np.uint8),
                 pet_mean_img.shape,
-            )  # TODO: Cache the 3D and 2D versions of this someplace to avoid reordering them. This takes way too long, especially in debug!
+            )  # TODO: Cache the 3D and 2D versions of this some place to avoid reordering them. This takes way too long, especially in debug!
             confetti_dict = calculate_confetti_score(
                 mask_3d, pet_mean_img
             )
@@ -567,7 +585,7 @@ def find_centroids(
             # If used, clear the huge labels matrix to avoid duplicating info
             # this_centroid.labels = None
 
-            all_centroids.append(this_centroid)
+            centroids[(k, i + 1)] = this_centroid
 
         # Rather than logging them out of order, we pool all messages from
         # a given k, hold them, and we emit them all in one chunk here.
@@ -581,7 +599,7 @@ def find_centroids(
         f"{post_k_timestamp - pre_k_timestamp}"
     )
 
-    return all_centroids, k_means_fits
+    return centroids, k_means_fits
 
 
 def label_best_centroid(centroids, best_label="best_overall", keep_confetti=False):
@@ -589,10 +607,16 @@ def label_best_centroid(centroids, best_label="best_overall", keep_confetti=Fals
 
     logger = logging.getLogger("STARE")
 
-    best_centroid = None
+    # This should be a list, but handle a dict, too
+    centroids = centroids if isinstance(centroids, list) else list(centroids.values())
+
     if not keep_confetti:
-        centroids = [c for c in centroids
-                     if not c.features.get("likely_confetti", False)]
+        centroids = [
+            c for c in centroids
+            if not c.features.get("likely_confetti", False)
+        ]
+
+    best_centroid = None
     if best_label == 'best_in_k':
         # Select the 'best' from among all vascular centroids.
         # Do this by finding the earliest peak, then among centroids
@@ -699,7 +723,7 @@ def find_vascular_centroids(
     logger = logging.getLogger("STARE") if logger is None else logger
 
     # Run k-means, and label centroids with features.
-    all_centroids, k_means_fits = find_centroids(
+    centroids, k_means_fits = find_centroids(
         pet_4d_img,
         mask_img,
         ks,
@@ -712,7 +736,7 @@ def find_vascular_centroids(
         # Split all centroids into vascular and other, for this value of k
         vascular_centroids = []
         other_centroids = []
-        for centroid in [c for c in all_centroids if c.k == k]:
+        for centroid in [c for c in centroids.values() if c.k == k]:
             if centroid.features.get("likely_vascular", False):
                 # if (keep_confetti or
                 #         centroid.features.get('confetti_score', 0.0) <= 0.0
@@ -750,10 +774,15 @@ def find_vascular_centroids(
     # Which cluster-centroid timeseries has the highest peak?
     # And where is that peak?
     # from Matlab vascClust.m:160:174
-    best_in_k_centroids = [c for c in all_centroids if c.best_in_k]
+    best_in_k_centroids = [c for c in centroids.values() if c.best_in_k]
     for c in best_in_k_centroids:
         c.name = f"Best step {step}. {c.name}"
-    very_top_c = label_best_centroid(best_in_k_centroids, 'best_overall')
+    # The first pass of label_best_centroid for 'best_in_k'
+    # already filtered by confetti as appropriate for step and arguments.
+    # Here we can just pick the best of them.
+    very_top_c = label_best_centroid(
+        best_in_k_centroids, 'best_overall', keep_confetti=True
+    )
     if very_top_c:
         logger.debug(
             f"  From {len(best_in_k_centroids)} best-in-k options, "
@@ -764,7 +793,7 @@ def find_vascular_centroids(
         logger.debug("  Improbably, all best-in-k centroids were confetti-like.")
 
     # Return a list of all centroids, with the best labelled as such.
-    return all_centroids, k_means_fits
+    return centroids, k_means_fits
 
 
 def build_similarity(centroids, order_by=None, logger=None):
@@ -779,9 +808,9 @@ def build_similarity(centroids, order_by=None, logger=None):
     row_index = list()
     col_index = list()
 
-    for i, c1 in enumerate(centroids):
+    for i, (k1, c1) in enumerate(sorted(centroids.items(), key=lambda x: x[1].k if order_by is None else getattr(x[1], order_by))):
         row_index.append(f"{c1.label:02d}-{c1.k:02d}")
-        for j, c2 in enumerate(centroids):
+        for j, (k2, c2) in enumerate(sorted(centroids.items(), key=lambda x: x[1].k if order_by is None else getattr(x[1], order_by))):
             if i == 0:
                 col_index.append(f"{c2.label:02d}-{c2.k:02d}")
             if str(c1) == str(c2):
@@ -825,7 +854,7 @@ def consider_alternate_clusters(
         restricted to this same earliest peak. We explicitly want to see
         if the peak being too early caused us to miss a better option here.
 
-        :param list centroids: List of centroids
+        :param dict centroids: List of centroids
         :param list k_means_fits: List of fitted K-means calculations
         :param Nifti1Image source_4d_image: The image used to compute the KMeans
         :param int verbose: How verbose should we be with our output?
@@ -839,10 +868,11 @@ def consider_alternate_clusters(
     # Before beginning, locate the current selection of "best" centroid.
     # While doing this, count vascular centroids for a narrative report.
     first_choice_centroid = None
+    alt_centroid = None
     vascular_centroids = list()
     num_vascular_total = 0
     num_vascular_per_k = dict()
-    for c in centroids:
+    for c in centroids.values():
         if c.features.get("likely_vascular", False):
             vascular_centroids.append(c)
             num_vascular_total += 1
@@ -972,8 +1002,9 @@ def consider_alternate_clusters(
                 # We have an alternate centroid with a higher peak and a
                 # less spatially sparse clustering. We will use it.
                 html_lines.append(
-                    "NOT REALLY IN THIS VERSION: "
-                    f"Overriding the cluster selection with an alternate!!"
+                    # "NOT REALLY IN THIS VERSION: "
+                    f"**Recommending an override:**"
+                    # "Overriding the cluster selection with an alternate!!"
                     f" original best {first_choice_centroid.description()};"
                     f" new best is {alt_centroid.description()}."
                 )
@@ -987,7 +1018,7 @@ def consider_alternate_clusters(
                 ])
                 alt_centroid.best_overall = True
                 """
-                return html_lines
+                return alt_centroid, html_lines
             else:
                 logger.info(f"An alternate, {alt_centroid.description()}, "
                             "was considered and dropped.")
@@ -996,7 +1027,7 @@ def consider_alternate_clusters(
     else:
         logger.info("No alternate centroids were considered.")
 
-    return html_lines
+    return None, html_lines
 
 
 def find_peripheral_centroids(
@@ -1025,7 +1056,7 @@ def find_peripheral_centroids(
 
     logger = logging.getLogger("STARE") if logger is None else logger
 
-    all_centroids, k_means_fits = find_centroids(
+    centroids, k_means_fits = find_centroids(
         pet_4d_img,
         None,
         ks,
@@ -1037,7 +1068,7 @@ def find_peripheral_centroids(
     for k in ks:
         vascular_centroids = []
         other_centroids = []
-        for centroid in [c for c in all_centroids if c.k == k]:
+        for centroid in [c for c in centroids.values() if c.k == k]:
             if centroid.features.get("likely_vascular", False):
                 vascular_centroids.append(centroid)
             else:
@@ -1077,7 +1108,7 @@ def find_peripheral_centroids(
     # Which cluster-centroid timeseries has the highest peak?
     # And where is that peak?
     # from Matlab vascClust.m:160:174
-    best_in_k_centroids = [c for c in all_centroids if c.best_in_k]
+    best_in_k_centroids = [c for c in centroids.values() if c.best_in_k]
     top_indices, top_frequencies = np.unique(
         [c.peak_index for c in best_in_k_centroids], return_counts=True
     )
@@ -1087,7 +1118,7 @@ def find_peripheral_centroids(
     # Make a list of centroids that peak at the same, most common, time point
     centroids_with_best_idx = [
         c
-        for c in all_centroids
+        for c in centroids.values()
         if ((c.peak_index == best_centroid_idx) and c.best_in_k)
     ]
     # Of those centroids peaking together, which one peaks highest?
@@ -1106,4 +1137,4 @@ def find_peripheral_centroids(
     )
 
     # Return a list of all centroids, with the best labelled as such.
-    return all_centroids, k_means_fits
+    return centroids, k_means_fits

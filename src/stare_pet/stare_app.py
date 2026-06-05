@@ -56,7 +56,18 @@ class StareApp:
             self.results = minimize_parameter_cost(self.results)
             self.results.end()
             self.results.write_report()
-            self.results.save()
+            if self.args.debug and self.args.debug_path.exists():
+                # If debug is on, save the complete results object.
+                self.results.save()
+            else:
+                # If debug is off, we're finished; delete unneeded things
+                self.results.logger.debug("Deleting cache & debug directories")
+                for directory in [
+                    self.results.args.cache_path, self.results.args.debug_path
+                ]:
+                    for cache_file in directory.iterdir():
+                        cache_file.unlink(missing_ok=True)
+                    directory.rmdir()
             return 0
         else:
             return 1
@@ -186,14 +197,20 @@ class StareApp:
                  "blobs, constituting at least 90%% of the voxels."
         )
         parser.add_argument(
-            "--consider-alternate-step-one-cluster", action="store_true",
+            "--consider-alternate-step-one-cluster",
+            action="store_true", default=False,
             help="Set this to True to cause STARE to assess the step one k-means "
-                 "cluster, compare it to alternative clusters, and change its "
-                 "selection if it finds a better option. Note that 'better' is "
-                 "subject to many factors and may change version-to-version."
+                 "cluster, compare it to alternative clusters, and recommend "
+                 "an alternate selection if it finds a better option. "
+                 "Note that 'better' is subject to many factors and may change "
+                 "version-to-version. And this doesn't actually select the new "
+                 "cluster, but only recommends it. To implement the new cluster, "
+                 "use the `--override-step-one-cluster` option with the suggested "
+                 "cluster from this run."
         )
         parser.add_argument(
-            "--keep-confetti-pattern", action="store_true",
+            "--keep-confetti-patterns-step-1",
+            action="store_true", default=False,
             help="By default, STARE will not consider k-means clusters that look "
                  "like 'confetti on the floor'. Noisy scans may produce these "
                  "and they can have high early peaks that prevent selection "
@@ -201,23 +218,34 @@ class StareApp:
                  "these clusters as 'likely_vascular' while scoring them."
         )
         parser.add_argument(
+            "--drop-confetti-patterns-step-2",
+            action="store_true", default=False,
+            help="By default, STARE will assume the step 1 filter excluded "
+                 "problematic clusters, so this is no longer needed at step 2. "
+                 "This option causes STARE to apply the filter again, "
+                 "excluding any of the four sub-clusters marked as noise."
+        )
+        parser.add_argument(
             "--latest-usable-volume", type=int, default=-1,
             help="Run STARE only on the earliest N volumes specified. "
                  "This can be useful for time stability analyses."
         )
         parser.add_argument(
-            "--decompose-components", action="store_true",
+            "--decompose-components",
+            action="store_true", default=False,
             help="Turn on to generate PCA and ICA component maps. "
                  "Stare_pet doesn't use these yet, but they can be compared with "
                  "k-means clusters."
         )
         parser.add_argument(
-            "--save-all-cluster-masks", action="store_true",
+            "--save-all-cluster-masks",
+            action="store_true", default=False,
             help="Turn on to save nifti masks of all clusters, not just best. "
                  "These masks will be saved in the 'debug/masks/' directory."
         )
         parser.add_argument(
-            "--save-all-failures", action="store_true",
+            "--save-all-failures",
+            action="store_true", default=False,
             help="This feature is not yet available. In a future version, "
                  "Turn on to save parameters of failed curve fits. "
                  "This can be useful for debugging or investigating the range of "
@@ -226,21 +254,33 @@ class StareApp:
                  "be written to a csv file in the 'debug/' directory."
         )
         parser.add_argument(
-            "--ignore-spatial-info", action="store_true",
-            help="Turn on to ensure the cluster selected by k-means, "
-                 "based only on temporal information, is used "
-                 "without considering spatial information to override it."
+            "--ignore-spatial-info-step-1",
+            action="store_true", default=False,
+            help="By default, spatial info is used to filter step-one k-means "
+                 "clustering. Turn this on to ensure the best cluster selected "
+                 "by step-one k-means, based only on temporal information, "
+                 "is used, without considering spatial information."
         )
         parser.add_argument(
-            "--stop-after-clustering", action="store_true",
+            "--utilize-spatial-info-step-2",
+            action="store_true", default=False,
+            help="By default, spatial info is used to filter step-one k-means "
+                 "clusters, but not step two. Turn this on to also filter the "
+                 "step-two k-means clusters."
+        )
+        parser.add_argument(
+            "--stop-after-clustering",
+            action="store_true", default=False,
             help="Exit after clustering is complete"
         )
         parser.add_argument(
-            "--stop-after-pvc", action="store_true",
+            "--stop-after-pvc",
+            action="store_true", default=False,
             help="Exit after partial volume correction is complete"
         )
         parser.add_argument(
-            "--output-all-fit-failures", action="store_true",
+            "--output-all-fit-failures",
+            action="store_true", default=False,
             help="Turn on to emit a note on each curve fit failure to the log"
         )
         parser.add_argument(
@@ -254,11 +294,11 @@ class StareApp:
             help="set from 0 to 2 times to trigger more verbose output",
         )
         parser.add_argument(
-            "--debug", action="store_true",
+            "--debug", action="store_true", default=False,
             help="Log extra data and pickle extra data to the debug directory.",
         )
         parser.add_argument(
-            "--force", action="store_true",
+            "--force", action="store_true", default=False,
             help="even if data are cached, recalculate and overwrite all output",
         )
         parser.add_argument(
@@ -266,7 +306,7 @@ class StareApp:
             help="where parallel processing is supported, use this many processes",
         )
         parser.add_argument(
-            "--version", action="store_true",
+            "--version", action="store_true", default=False,
             help="If specified, print the version and exit.",
         )
 
@@ -333,8 +373,8 @@ class StareApp:
         self.args.fig_path.mkdir(parents=True, exist_ok=True)
         setattr(self.args, "debug_path", Path(self.args.output_path) / "debug")
         self.args.debug_path.mkdir(parents=True, exist_ok=True)
-        setattr(self.args, "mask_path", Path(self.args.output_path) / "masks")
-        self.args.mask_path.mkdir(parents=True, exist_ok=True)
+        setattr(self.args, "cluster_path", Path(self.args.output_path) / "clusters")
+        self.args.cluster_path.mkdir(parents=True, exist_ok=True)
         if (not hasattr(self.args, "cache_path")) or (self.args.cache_path is None):
             setattr(self.args, "cache_path", Path(self.args.output_path) / "cache")
         self.args.cache_path.mkdir(parents=True, exist_ok=True)
