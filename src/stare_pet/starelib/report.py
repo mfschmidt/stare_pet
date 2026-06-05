@@ -179,13 +179,11 @@ class Report:
 
     @staticmethod
     def _get_js():
+        v3_url = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+        v4_url = "https://jsdelivr.net"
         return "\n".join([
-            "<script src=\"{}\"></script>".format(
-                "https://polyfill.io/v3/polyfill.min.js?features=es6"
-            ),
             "<script id=\"{}\" async src=\"{}\"></script>".format(
-                "MathJax - script",
-                "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+                "MathJax-script", v4_url,
             ),
             "",
         ])

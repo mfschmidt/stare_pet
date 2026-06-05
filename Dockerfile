@@ -5,10 +5,13 @@ FROM ubuntu:resolute
 # So stay with jammy until ITK 5.4, then test PetPVC with it.
 # -Mike 6/10/2024
 
-# Compiling software with ubuntu:resolute, python3.12, and ITK 5.4.6 (latest)
+# Compiling software with ubuntu:resolute, python3.14, and ITK 5.4.6 (latest)
 # works fine. I've added two environment variables to avoid being
 # asked about regions for time zones. I removed libgl1-mesa-glx as it's
 # not available in resolute and things worked without it.
+# The directory structure has been updated along with a new pyproject.toml
+# file to move from setuptools to uv-build. A few minor code changes
+# were also made to stay aligned with updated libraries.
 # -Mike 6/27/2026
 
 ENV DEBIAN_FRONTEND="noninteractive"
@@ -56,7 +59,4 @@ WORKDIR /opt/stare_pet
 RUN uv lock && uv sync --frozen --no-dev
 ENV PATH="/opt/stare_pet/.venv/bin:$PATH"
 
-# ENTRYPOINT ["/opt/stare_pet/.venv/bin/python3", "/opt/stare_pet/.venv/bin/stare_app.py"]
-# ENTRYPOINT ["/root/.local/bin/uv", "--directory", "/opt/stare_pet", "run", "/opt/stare_pet/.venv/bin/stare"]
 ENTRYPOINT ["python3", "/opt/stare_pet/.venv/bin/stare"]
-# ENTRYPOINT ["python3", "/opt/stare_pet/src/stare_pet/stare_app.py"]
