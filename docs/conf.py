@@ -18,11 +18,11 @@ sys.path.insert(0, os.path.abspath('../src'))
 # -- Project information -----------------------------------------------------
 
 project = 'stare_pet'
-copyright = '2022 Mike Schmidt'
+copyright = '2026 Mike Schmidt'
 author = 'Betsy Bartlett, Mike Schmidt, Francesca Zanderigo'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.6'
+release = '0.12.5'
 
 
 # -- General configuration ---------------------------------------------------
