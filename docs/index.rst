@@ -48,7 +48,7 @@ increases the information sent to stdout. If you use `--verbose --verbose`,
 it will also write out masks for every cluster, even those deemed irrelevant,
 into a `debug` directory so you can look more closely at them.
 These and additional command-line options are documented in
-`the stare executable <stare.html>`_.
+`the command line options <command_line_options.html>`_.
 
 The expected layout and file naming of input directories is still undocumented,
 making this software only useful for the developers at this point.
@@ -60,7 +60,7 @@ Documentation
    :maxdepth: 3
    :caption: Contents:
 
-   stare
+   command_line_options
    starelib
    classes
 
