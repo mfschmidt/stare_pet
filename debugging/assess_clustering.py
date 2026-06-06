@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits import mplot3d
 from matplotlib.colors import LightSource
 from matplotlib.gridspec import GridSpec
+import matplotlib.colors as mcolors
 import seaborn as sns
 from PIL import Image
 from PIL import ImageDraw
@@ -479,6 +480,7 @@ def build_initial_3d_figure(
         stare_out_path,
         s1_mesh=None, s2_mesh=None, clip_mesh=None,
         pca0_mesh=None, pca1_mesh=None,
+        s1_color="pink", s2_color="purple",
 ):
     """ Build a 3d image of the vascular clusters
     """
@@ -530,7 +532,8 @@ def build_initial_3d_figure(
     # Create, color, and light the step 1 mesh (yellow)
     if s1_mesh is not None:
         step_1_alpha = 0.40
-        color_step_1 = np.array((1.0, 1.0, 57 / 255.0, step_1_alpha))
+        step_1_color = mcolors.to_rgba(s1_color, alpha=step_1_alpha)
+        color_step_1 = np.array(step_1_color)
         mesh_step_1 = mplot3d.art3d.Poly3DCollection(
             s1_mesh.vectors,
             shade=False,
@@ -541,8 +544,9 @@ def build_initial_3d_figure(
 
     # Create, color, and light the step 2 mesh
     if s2_mesh is not None:
-        step_2_alpha = 1.0
-        color_step_2 = np.array((1.0, 54.0 / 255.0, 57 / 255.0, step_2_alpha))
+        step_2_alpha = 0.9
+        step_2_color = mcolors.to_rgba(s2_color, step_2_alpha)
+        color_step_2 = np.array(step_2_color)
         mesh_step_2 = mplot3d.art3d.Poly3DCollection(
             s2_mesh.vectors,
             alpha=step_2_alpha, shade=True,
