@@ -138,12 +138,12 @@ def correct_partial_volumes(results):
 
     results.pvc_mean_vascular_tac = pvc_tac
 
-    if results.args.debug:
+    if results.args.debug and results.args.debug_path.exists():
         # noinspection PyTypeChecker
         pickle.dump(
             results.pvc_mean_vascular_tac,
             open(results.args.debug_path /
-                 f"sub-{results.args.subject}_tac_pvc.pkl",
+                 f"sub-{results.args.subject}_tac_pvc.pickle",
                  "wb")
         )
 
@@ -174,7 +174,7 @@ def correct_partial_volumes(results):
     # If a TAC was reduced, add the original TAC, too, and make it dashed.
     if "reduced" in results.best_centroid(step=1).name:
         tac_plot_dashes[results.best_centroid(step=1).name] = (4, 1)
-        for centroid in results.cluster_centroids[1]:
+        for centroid in results.cluster_centroids[1].values():
             if 'former_champion' in centroid.features.keys():
                 tac_plot_data.append(centroid)
                 tac_plot_palette[centroid.name] = "cornflowerblue"

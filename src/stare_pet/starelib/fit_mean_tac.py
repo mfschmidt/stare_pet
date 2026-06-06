@@ -125,7 +125,7 @@ def fit_vascular_mean_tac(results):
     # Step 3. Correct TACs by extracting the mean signal from each cluster.
     # Needs to know about ignored mid-times to weight durations appropriately
 
-    cache_file = f"sub-{results.args.subject}_step-3_decay_model_fits.pkl"
+    cache_file = f"sub-{results.args.subject}_step-3_decay_model_fits.pickle"
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
@@ -149,7 +149,7 @@ def fit_vascular_mean_tac(results):
     if results.args.debug and results.args.debug_path.exists():
         with open(
                 results.args.debug_path /
-                f"sub-{results.args.subject}_fits.pkl",
+                f"sub-{results.args.subject}_fits.pickle",
                 "wb"
         ) as f:
             pickle.dump(successes, f)
@@ -184,13 +184,13 @@ def fit_vascular_mean_tac(results):
     if results.args.debug and results.args.debug_path.exists():
         with open(
                 results.args.debug_path /
-                f"sub-{results.args.subject}_tac_from_fitting.pkl",
+                f"sub-{results.args.subject}_tac_from_fitting.pickle",
                 "wb"
         ) as f:
             pickle.dump(lores_tac, f)
         with open(
                 results.args.debug_path /
-                f"sub-{results.args.subject}_hires_tac_from_fitting.pkl",
+                f"sub-{results.args.subject}_hires_tac_from_fitting.pickle",
                 "wb"
         ) as f:
             pickle.dump(hires_tac, f)

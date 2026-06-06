@@ -281,8 +281,8 @@ def validate_arguments(args):
     args.fig_path.mkdir(parents=True, exist_ok=True)
     setattr(args, "debug_path", Path(args.output_path) / "debug")
     args.debug_path.mkdir(parents=True, exist_ok=True)
-    setattr(args, "mask_path", Path(args.output_path) / "masks")
-    args.mask_path.mkdir(parents=True, exist_ok=True)
+    setattr(args, "cluster_path", Path(args.output_path) / "clusters")
+    args.cluster_path.mkdir(parents=True, exist_ok=True)
     if (not hasattr(args, "cache_path")) or (args.cache_path is None):
         setattr(args, "cache_path", Path(args.output_path) / "cache")
     args.cache_path.mkdir(parents=True, exist_ok=True)

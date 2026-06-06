@@ -776,14 +776,14 @@ def write_fsl_script(
     # Find selected step one and step two clusters
     try:
         step_one_mask_path = sorted(stare_output_path.glob(
-            "masks/cluster_step-1_best_mask.nii.gz"
+            "clusters/cluster_step-1_best_mask.nii.gz"
         ))[0]
     except IndexError:
         errors.append(f"No step 1 mask image found in {stare_output_path}")
         step_one_mask_path = None
     try:
         step_two_mask_path = sorted(stare_output_path.glob(
-            "masks/cluster_step-2_best_mask.nii.gz"
+            "clusters/cluster_step-2_best_mask.nii.gz"
         ))[0]
     except IndexError:
         errors.append(f"No step 2 mask image found in {stare_output_path}")
@@ -809,11 +809,11 @@ def write_fsl_script(
         f.write("#!/bin/bash\n\n")
         f.write("# Execute fsleyes with all relevant images loaded\n")
         if background_image_path is None:
-            f.write(f"echo \"No background image found in {stare_output_path}\"")
+            f.write(f"echo \"No background image found in {stare_output_path}\n\"")
         if step_one_mask_path is None:
-            f.write(f"echo \"No step 1 mask image found in {stare_output_path}\"")
+            f.write(f"echo \"No step 1 mask image found in {stare_output_path}\n\"")
         if step_two_mask_path is None:
-            f.write(f"echo \"No step 2 mask image found in {stare_output_path}\"")
+            f.write(f"echo \"No step 2 mask image found in {stare_output_path}\n\"")
 
         f.write("fsleyes \\\n")
         if background_image_path:
@@ -873,11 +873,11 @@ def write_fsl_script(
         for line in best_in_k_lines:
             f.write(line)
         if step_one_mask_path:
-            f.write(f"\"./masks/{step_one_mask_path.name}\" \\\n")
+            f.write(f"\"./clusters/{step_one_mask_path.name}\" \\\n")
             f.write(f"  --name \"Selected Step 1 Cluster\" --overlayType mask \\\n")
             f.write(f"  --maskColour 1.0 1.0 0.0 --alpha 50 \\\n")
         if step_two_mask_path:
-            f.write(f"\"./masks/{step_two_mask_path.name}\" \\\n")
+            f.write(f"\"./clusters/{step_two_mask_path.name}\" \\\n")
             f.write(f"  --name \"Selected Step 2 Cluster\" --overlayType mask \\\n")
             f.write(f"  --maskColour 1.0 0.0 0.0 --alpha 50 \\\n")
         f.write("\n\n")  # to terminate the \\ above

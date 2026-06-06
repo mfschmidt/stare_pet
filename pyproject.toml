@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "stare_pet"
-version = "0.12.4"
+version = "0.12.5"
 description = "A python implementation of Source-to-Target Automatic Rotating Estimation (STARE)"
 readme = "README.md"
 authors = [

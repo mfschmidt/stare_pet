@@ -134,14 +134,14 @@ class Results:
         )
         if self._args.debug:
             with open(
-                self._args.debug_path / f"sub-{self._args.subject}_results.pkl",
+                self._args.debug_path / f"sub-{self._args.subject}_results.pickle",
                 "wb"
             ) as f:
                 pickle.dump(self, f)
 
     def save(self):
         with open(
-            self._args.output_path / f"sub-{self._args.subject}_results.pkl",
+            self._args.output_path / f"sub-{self._args.subject}_results.pickle",
             "wb"
         ) as f:
             pickle.dump(self, f)

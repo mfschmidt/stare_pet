@@ -32,7 +32,7 @@ class StareResults(Results):
         self.input_time_units = None
 
         # Data from two-step clustering
-        self.cluster_centroids = {1: [], 2: [], }  # contains best TAC so far
+        self.cluster_centroids = {1: dict(), 2: dict(), }  # contains best TAC so far
         self.cluster_model_fits = {1: [], 2: [], }
         self.best_vascular_mask_path = {}
 
@@ -83,7 +83,7 @@ class StareResults(Results):
                 for t in self.cropped_4D.shape[3]]
 
     def best_centroid(self, step=2):
-        for centroid in self.cluster_centroids[step]:
+        for centroid in self.cluster_centroids[step].values():
             if centroid.best_overall:
                 return centroid
         return None

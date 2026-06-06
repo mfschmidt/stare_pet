@@ -139,9 +139,18 @@ def best_of(centroids):
         :return: Centroid object labeled "best_overall"
     """
 
-    for centroid in centroids:
-        if centroid.best_overall:
-            return centroid
+    if isinstance(centroids, list):
+        for centroid in centroids:
+            if centroid.best_overall:
+                return centroid
+    elif isinstance(centroids, dict):
+        for two_tuple, centroid in centroids.items():
+            if centroid.best_overall:
+                return centroid
+    else:
+        raise ValueError(f"Expected list or dict for centroids, "
+                         f"got {str(type(centroids))}")
+    return None
 
 
 def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
@@ -248,6 +257,63 @@ def tabulate_centroids(centroids, added_columns=None):
     return df.sort_values(by=['k', 'label', ])
 
 
+# If we were asked explicitly to use an alternative cluster, do so.
+def override_cluster(results, step, centroids, rpt_sect, pet_4d_img):
+    """ Override the k-means auto-selection with a new cluster.
+
+        It's debatable whether this should prevent clustering from running.
+        It currently depends on copying things from the calculated centroid
+        so it must run after k-means.
+
+        :param results: Results object containing all STARE data
+        :param step: step number to use
+        :param centroids: dict of centroids
+        :param rpt_sect: Report section to add log messages to
+        :param pet_4d_img: PET 4D image to use for clustering
+        :returns: centroid, data, path to a Nifti image of the mask
+    """
+
+    new_mask_path = None
+    if step == 1:
+        if results.args.override_step_1_cluster is None:
+            # Not overriding the step 1 cluster
+            return
+        new_mask_path = results.args.override_step_1_cluster
+    if step == 2:
+        if results.args.override_step_1_cluster is None:
+            # Not overriding the step 2 cluster
+            return
+        new_mask_path = results.args.override_step_2_cluster
+
+    rpt_sect.add_line(f"Step {step} cluster overridden by external mask"
+                      f", '{str(new_mask_path)}'.")
+
+    results.best_vascular_mask_path[step] = new_mask_path
+    _manual_centroid, _manual_data = fake_centroid_from_mask(
+        new_mask_path, best_of(centroids), pet_4d_img,
+    )
+    _manual_centroid.name = f"Overridden best step {step} centroid"
+    # _best_cluster_as_image = nib.nifti1.Nifti1Image(
+    #     _manual_data, affine=pet_4d_img.affine,
+    # )
+    # Delete the cache file for step two. We're overriding it.
+    (results.args.cache_path /
+     f"sub-{results.args.subject}_k_step-{step}_centroids_and_fits.pickle"
+     ).unlink(missing_ok=True)
+
+    # Keep the old cluster, but take away its 'best_overall' flag.
+    best_of(centroids).best_overall = False
+    # Add the new cluster, and flag it as the 'best_overall'.
+    _manual_centroid.best_overall = True
+
+    # 1 and 1 are hard-coded into fake_centroid_from_mask because there will
+    # never be a k==1. And there should never be multiple overridden centroids.
+    # (1, 1) indicates this centroid did not come from k-means.
+    centroids[(1, 1)] = _manual_centroid
+
+    return
+
+
 def post_process_clusters(
         centroids,
         k_means_model_fits,
@@ -259,7 +325,7 @@ def post_process_clusters(
 ):
     """ After k-means, handle any additional processing before use.
 
-    :param centroids: A list of all centroid objects, vascular centroids
+    :param centroids: A dict of all centroid objects, vascular centroids
         will be separated from the rest before expensive computations.
     :param k_means_model_fits: results from the k-means processing
     :param pet_4d_img: The 4D PET image,
@@ -268,102 +334,61 @@ def post_process_clusters(
     :param step: Is this step 1 or step 2 clustering?
     :param rpt_sect: The report section for writing lines
     :param logger: A logging object for console and log output
-    :return: A list of centroids, may point to different centroids than inputs
+    :return: A dict of centroids, may point to different centroids than inputs
     """
 
-    # If we were asked not to post-process, just pass data right back.
-    if results.args.ignore_spatial_info:
-        rpt_sect.add_line("Centroids were not post-processed.")
+    # If asked, override the k-means decision. Centroids are modified in place.
+    override_cluster(results, step, centroids, rpt_sect, pet_4d_img)
+
+    # If we were asked not to post-process (--ignore-spatial-info),
+    # just pass the centroids right back unmodified.
+    # But other flags will override this.
+    if (
+            results.args.ignore_spatial_info and
+            (results.args.reduce_step_one_sparsity == 0) and
+            (not results.args.consider_alternate_step_one_cluster) and
+            (not results.args.drop_confetti_patterns_step_2)
+    ):
+        rpt_sect.add_line(f"  > Step {step}: Centroids were not post-processed.")
         return centroids  # untouched
 
-    # If we were asked explicitly to use an alternative cluster, do so.
-    def _override(k_step, new_mask_path):
-        """ Override the k-means auto-selection with a new cluster.
-
-            It's debatable whether this should prevent clustering from running.
-            It currently depends on copying things from the calculated centroid
-            so it must run after k-means.
-
-            :param k_step: step number to use
-            :param new_mask_path: new mask path
-            :returns: centroid, data, path to a Nifti image of the mask
-        """
-
-        results.best_vascular_mask_path[k_step] = new_mask_path
-        rpt_sect.add_line(f"Step {k_step} cluster overridden by external mask"
-                          f", '{str(new_mask_path)}'.")
-        _manual_centroid, _manual_data = fake_centroid_from_mask(
-            new_mask_path, best_of(centroids), pet_4d_img,
-        )
-        _manual_centroid.name = f"Overridden best step {k_step} centroid"
-        # _best_cluster_as_image = nib.nifti1.Nifti1Image(
-        #     _manual_data, affine=pet_4d_img.affine,
-        # )
-        # Delete the cache file for step two. We're overriding it.
-        (results.args.cache_path /
-         f"sub-{results.args.subject}_k_step-{k_step}_centroids_and_fits.pkl"
-         ).unlink(missing_ok=True)
-
-        # Keep the old cluster, but take away its 'best_overall' flag.
-        best_of(centroids).best_overall = False
-        # Add the new cluster, and flag it as the 'best_overall'.
-        _manual_centroid.best_overall = True
-        centroids.append(_manual_centroid)
-
-        return _manual_centroid, _manual_data
-
-    # If asked, override the k-means decision. Centroids are modified in place,
-    # so the returned objects are convenient, but not necessary.
-    if (step == 1) and results.args.override_step_1_cluster:
-        _ = _override(
-            step, results.args.override_step_1_cluster
-        )
-
-    # If we were asked to use an alternative cluster explicitly, do so.
-    if (step == 2) and results.args.override_step_2_cluster:
-        _ = _override(
-            step, results.args.override_step_2_cluster
-        )
+    # If execution gets here,
+    # we are not ignoring SI if step 1 (the default);
+    # and we are utilizing SI if step 2 (NOT the default).
+    # We may have an overridden cluster that we should not exclude.
+    logger.info(f"  > Step {step}: Considering spatial information for post-processing")
 
     # We really don't care about non-vascular centroids,
     # but we track them all so we can put them back together
     # after replacing vascular centroids with new ones including spatial info.
-    vascular_centroids = [
-        c for c in centroids
-        if c.features.get("likely_vascular", False)
-    ]
-    other_centroids = [c for c in centroids if c not in vascular_centroids]
+    vascular_centroids = {
+        k: v for k, v in centroids.items()
+        if v.features.get("likely_vascular", False)
+    }
+    # vascular_centroids = [
+    #     c for c in centroids
+    #     if c.features.get("likely_vascular", False)
+    # ]
+    # other_centroids = [c for c in centroids if c not in vascular_centroids]
+    rpt_sect.add_line(f"  > Step {step}: {len(vascular_centroids)} vascular centroids")
 
     # To calculate debug/spatial info, each centroid needs to carry a
     # reference to its 1-based labels. But only the 'best_in_k' centroids
-    # were previously paired with their labels. We don't really want to save
-    # 200 copies of multi-GB images when we write the results object to disk.
+    # were previously paired with their labels. We don't want to save 200
+    # identical copies of multi-GB images in the Results object.
     # But we need to pair labels w/vascular clusters to calculate_spatial_info.
-    for c in vascular_centroids:
+    for k, c in vascular_centroids.items():
         a = c.labels if c.labels is not None else np.zeros((0,))
         logger.debug(f"C {c.label}/{c.k} labels {a.shape}")
         if c.labels is None:  # We'd never find an overridden cluster's labels
             c.labels = k_means_model_fits[c.k].labels_ + 1
-    # Send centroids off to be run in multiple processes
-    # Separate processes cannot share memory, so we do the calculations,
-    # then overwrite our vascular centroids list with the new ones.
-    # Then we need to weave these new centroids into the original list.
-    vascular_centroids = calculate_spatial_info(
-        vascular_centroids,
-        step, logger, num_cpus=results.args.num_cpus
-    )
-    num_replacements = 0
-    for i, cent_a in enumerate(centroids):
-        for cent_b in vascular_centroids:
-            if (cent_a.label == cent_b.label) and (cent_a.k == cent_b.k):
-                # Replace the original centroid with the same one,
-                # but with spatial information
-                centroids[i] = cent_b
-                num_replacements += 1
-    print(f"replaced {num_replacements} of {len(vascular_centroids)} "
-          f"vascular centroids (of {len(centroids)} total centroids).")
 
-    logger.info("Calculating centroid similarity and k-stability")
+    # Send centroids off to be run in multiple processes
+    vascular_centroids = calculate_spatial_info(
+        vascular_centroids, step, logger, num_cpus=results.args.num_cpus
+    )
+
+    logger.info("  > Calculating centroid similarity and k-stability")
     sim_mat = build_similarity(vascular_centroids)
     calculate_k_stability(vascular_centroids, sim_mat)
 
@@ -371,6 +396,7 @@ def post_process_clusters(
             (step == 1) and
             (results.args.reduce_step_one_sparsity != 0)
     ):
+        logger.info(f"  > Considering alternate clusters for step {step}")
         # Make a copy of the current best centroid,
         # and modify the copy to remove the smallest blobs.
         # Then re-calculate spatial info and continue with it.
@@ -395,27 +421,47 @@ def post_process_clusters(
         original_best_centroid.best_overall = False
         # Provide a key for the plotter to include this TAC, too.
         original_best_centroid.features['former_champion'] = True
-        centroids.append(new_best_centroid)
+        vascular_centroids[(new_best_centroid.k, new_best_centroid.label)] = new_best_centroid
+    else:
+        logger.info(f"  > Not reducing sparsity for step {step}")
 
     # If spatial information convinces us to abandon our original k-means
     # cluster selection, override it with a new one.
     # Pass all centroids so it can report the ratio of vascular/all
-    if results.args.consider_alternate_step_one_cluster:
-        alt_cluster_html = consider_alternate_clusters(
-            centroids, k_means_model_fits, pet_4d_img,
+    if (
+            (step == 1) and
+            results.args.consider_alternate_step_one_cluster
+    ):
+        logger.info(f"  > Considering (but not deploying) alternate clusters for step {step}")
+        alt_centroid, alt_cluster_html = consider_alternate_clusters(
+            vascular_centroids, k_means_model_fits, pet_4d_img,
             verbose=results.args.verbose, logger=logger
         )
         for line in alt_cluster_html:
             rpt_sect.add_line(line)
+        if alt_centroid:
+            # Ensure the cluster is available for use in future overrides.
+            make_atlas_and_mask(
+                alt_centroid, image.mean_img(pet_4d_img),
+                out_path=results.args.cluster_path,
+                file_desc=f"step-{step}_override",
+                # resample_to=crop_3d_pet_img if data_are_resampled else None,
+                logger=logger,
+                )
+    else:
+        logger.info(f"  > Not considering alternate clusters for step {step}")
 
-    if results.args.debug:
+    # Vascular centroids have been filled in with spatial information.
+    # We need to retain that by replacing original empty vascular centroids.
+    centroids.update(vascular_centroids)
+
+    if results.args.debug and results.args.debug_path.exists():
         sim_mat.to_csv(results.args.debug_path / f"dice_step_{step}.csv")
         # noinspection PyTypeChecker
         pickle.dump(
             centroids,
-            open(results.args.debug_path / f"step-{step}_centroids.pkl", "wb")
+            open(results.args.debug_path / f"step-{step}_centroids.pickle", "wb")
         )
-
     return centroids
 
 
@@ -440,21 +486,33 @@ def load_or_calculate_clusters(
     logger = logging.getLogger("STARE") if logger is None else logger
 
     # If prior models were saved to disk, load them rather than running.
-    cache_file = "sub-{}_step-1-{}_centroids_and_fits.pkl".format(
+    cache_file = "sub-{}_step-1-{}_centroids_and_fits.pickle".format(
         results.args.subject, step
     )
     cached_data = from_cache(
         results.args.cache_path, cache_file, results.args.force
     )
     if cached_data is None:
+        # Originally, "keep_confetti=results.args.keep_confetti_pattern"
+        # was passed to cluster_function. But we want to do this differently
+        # for step one and two. So we'll try this a new way.
+        keep_confetti = False  # by default, overridden by either of 2 steps
+        if step == 1:
+            # If we ignore spatial info, keep the confetti patterns
+            keep_confetti = results.args.keep_confetti_patterns_step_1
+        elif step == 2:
+            # If we utilize spatial info, drop the confetti patterns
+            keep_confetti = not results.args.drop_confetti_patterns_step_2
         # Calculate the clusters via k-means with multiprocessing
+        # K-Means will get very verbose, so only turn that on for debugging.
+        verbosity_value = 1 if results.args.debug else 0
         all_centroids, model_fits = cluster_function(
             source_4d_image, mask_image,
             ks, step,
             mid_times=results.mid_times,
             num_cpus=results.args.num_cpus,
-            keep_confetti=results.args.keep_confetti_pattern,
-            verbose=results.args.verbose,
+            keep_confetti=keep_confetti,
+            verbose=verbosity_value,
             logger=logger,
         )
 
@@ -513,7 +571,7 @@ def save_table_of_centroid_stats(results, step):
     """ Tabulate centroid stats and save them to a csv file. """
 
     # Add on two extra features to each centroid before saving table.
-    for c in results.cluster_centroids[step]:
+    for k, c in results.cluster_centroids[step].items():
         m1, b1 = likely_irreversible_linear(
             c, return_features=True, skip_t0=False
         )
@@ -528,16 +586,16 @@ def save_table_of_centroid_stats(results, step):
     # And now, build the table and write it with other results.
     centroid_table = pd.concat([
         tabulate_centroids(
-            results.cluster_centroids[step],
+            list(results.cluster_centroids[step].values()),
             added_columns={'subject': results.args.subject, 'step': step},
         ),
     ], axis=0).reset_index(drop=True)
 
-    filename = f"sub-{results.args.subject}_vasc_clust_step-{step}_metadata.csv"
+    filename = f"sub-{results.args.subject}_step-{step}_vasc_clust_metadata.csv"
     # Order columns so subject and step are first
     cols = [c for c in centroid_table.columns if c not in ['subject', 'step']]
     centroid_table[['subject', 'step', ] + cols].to_csv(
-        results.args.debug_path / filename, index=False, float_format='%0.5f'
+        results.args.cluster_path / filename, index=False, float_format='%0.5f'
     )
 
     # It's also very useful to have centroid data for plotting and comparisons
@@ -545,7 +603,7 @@ def save_table_of_centroid_stats(results, step):
     centroid_data_idx = None
     centroid_data_columns = []
     centroid_data_values = []
-    for c in results.cluster_centroids[step]:
+    for k, c in results.cluster_centroids[step].items():
         if centroid_data_idx is None:
             centroid_data_idx = c.timepoints
         else:
@@ -558,16 +616,16 @@ def save_table_of_centroid_stats(results, step):
             if c.blob_data is None:
                 print("WTF!?!? The best centroid has no blob data!")
             else:
-                c.blob_data.to_csv(results.args.debug_path / "best_cluster_blobs.csv")
+                c.blob_data.to_csv(results.args.cluster_path / "best_cluster_blobs.csv")
 
     centroid_data = pd.DataFrame(
         data=np.vstack(centroid_data_values).T,
         index=pd.Index(centroid_data_idx),
         columns=centroid_data_columns
     )
-    filename = f"sub-{results.args.subject}_vasc_clust_step-{step}_data.csv"
+    filename = f"sub-{results.args.subject}_step-{step}_vasc_clust_tacs.csv"
     centroid_data.to_csv(
-        results.args.debug_path / filename,
+        results.args.cluster_path / filename,
         index=True, float_format='%0.5f'
     )
 
@@ -802,7 +860,7 @@ def two_step_cluster(results):
     save_table_of_centroid_stats(results, 1)
     step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
         k_means_results[1]['best_centroid'],
-        curr_3d_pet_img, out_path=results.args.output_path / "masks",
+        curr_3d_pet_img, out_path=results.args.cluster_path,
         file_desc=f"step-{1}_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
         logger=logger,
@@ -811,7 +869,7 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_1_atlas_path, step_1_mask_path = make_atlas_and_mask(
             k_means_results[1]['best_centroid'],
-            curr_3d_pet_img, out_path=results.args.output_path / "masks",
+            curr_3d_pet_img, out_path=results.args.cluster_path,
             file_desc=f"step-{1}_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
             pad_to=orig_3d_pet_img,
@@ -843,7 +901,7 @@ def two_step_cluster(results):
     save_table_of_centroid_stats(results, 2)
     step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
         k_means_results[2]['best_centroid'],
-        curr_3d_pet_img, out_path=results.args.output_path / "masks",
+        curr_3d_pet_img, out_path=results.args.cluster_path,
         file_desc=f"step-2_best",
         resample_to=crop_3d_pet_img if data_are_resampled else None,
         logger=logger,
@@ -852,7 +910,7 @@ def two_step_cluster(results):
     if results.args.axial_slices_to_clip > 0:
         step_2_atlas_path, step_2_mask_path = make_atlas_and_mask(
             k_means_results[2]['best_centroid'],
-            curr_3d_pet_img, out_path=results.args.output_path / "masks",
+            curr_3d_pet_img, out_path=results.args.cluster_path,
             file_desc=f"step-2_best",
             resample_to=crop_3d_pet_img if data_are_resampled else None,
             pad_to=orig_3d_pet_img,
@@ -882,7 +940,7 @@ def two_step_cluster(results):
     # Plot the TACs from the first k-means step
     for step in [1, 2, ]:
         # Plot the TACs from vascular cluster centroids.
-        fig = plot_vascular_tacs(results.cluster_centroids[step], tall=True)
+        fig = plot_vascular_tacs(list(results.cluster_centroids[step].values()), tall=True)
         filename = f"sub-{results.args.subject}_step-1-{step}_vascular_tacs.png"
         fig.savefig(results.args.fig_path / filename)
         logger.info(f"WROTE {filename} to {str(results.args.fig_path)}")
@@ -897,30 +955,35 @@ def two_step_cluster(results):
 
         # These data can be used to build custom plots or otherwise explore.
         filename = f"sub-{results.args.subject}_step-1-{step}_kmeans_tac.csv"
-        tacs_to_plottable_dataframe(results.cluster_centroids[step]).to_csv(
+        tacs_to_plottable_dataframe(list(results.cluster_centroids[step].values())).to_csv(
             results.args.output_path / filename, index=False,
         )
         logger.info(f"WROTE {filename} to {str(results.args.output_path)}")
 
         # Before pickling, remove redundant copies of the huge label arrays.
         # But note that a sparsity-reduced or overridden centroid must be kept
-        for c in results.cluster_centroids[step]:
+        for k, c in results.cluster_centroids[step].items():
             if c.k != 1:
                 c.labels = None
-        filename = "sub-{}_step-{}_kmeans_centroid.pkl".format(
-            results.args.subject, step
-        )
-        # noinspection PyTypeChecker
-        pickle.dump(
-            best_of(results.cluster_centroids[step]),
-            open(results.args.output_path / "debug" / filename, "wb")
-        )
+        if results.args.debug and results.args.debug_path.exists():
+            filename = "sub-{}_step-{}_kmeans_centroid.pickle".format(
+                results.args.subject, step
+            )
+            # noinspection PyTypeChecker
+            pickle.dump(
+                best_of(results.cluster_centroids[step]),
+                open(results.args.output_path / "debug" / filename, "wb")
+            )
 
         # Save out nifti masks (which ones conditional on verbosity)
         resample_template = curr_3d_pet_img
         if data_are_resampled:
             resample_template = crop_3d_pet_img
-        if results.args.save_all_cluster_masks or results.args.verbose > 2:
+        if (
+                results.args.save_all_cluster_masks or
+                results.args.verbose > 2 or
+                (results.args.debug and results.args.debug_path.exists())
+        ):
             save_centroid_masks(
                 results.cluster_centroids[step],
                 results.cluster_model_fits[step],
@@ -932,16 +995,16 @@ def two_step_cluster(results):
             )
             filename = f"sub-{results.args.subject}_step-{step}_vasc_tacs.png"
             unique_ks = sorted(np.unique([
-                c.k for c in results.cluster_centroids[step]
+                c.k for c in results.cluster_centroids[step].values()
             ]))
             for k in unique_ks:
-                cs_in_k = [c for c in results.cluster_centroids[step]
+                cs_in_k = [c for c in results.cluster_centroids[step].values()
                            if c.k == k]
                 # noinspection PyTypeChecker
                 pickle.dump(
                     cs_in_k,
                     open(results.args.debug_path / "masks" /
-                         f"centroids_step-{step}_k-{k}.pkl",
+                         f"centroids_step-{step}_k-{k}.pickle",
                          "wb")
                 )
                 plot_vascular_tacs(
