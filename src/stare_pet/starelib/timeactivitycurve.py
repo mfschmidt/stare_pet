@@ -130,7 +130,7 @@ class TimeActivityCurve:
         return None if self.sd is None else self.sd[self.peak_index:]
 
     def auc(self):
-        return np.trapz(y=self.activity, x=self.timepoints)
+        return np.trapezoid(y=self.activity, x=self.timepoints)
 
     def weights(self, method='sqrt'):
         """ Determine weights, based on timepoints, by method
