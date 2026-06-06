@@ -7,8 +7,8 @@ starelib classes
 ================
 
 
-.. autoclass:: starelib.timeactivitycurve::TimeActivityCurve
+.. autoclass:: stare_pet.starelib.timeactivitycurve.TimeActivityCurve
   :members:
 
-.. autoclass:: starelib.centroid::Centroid
+.. autoclass:: stare_pet.starelib.centroid.Centroid
   :members:

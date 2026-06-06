@@ -24,7 +24,14 @@ apt-get install -y git rsync \
                    python3-sphinx-argparse python3-setuptools \
                    python3-numpy python3-pandas python3-sklearn \
                    python3-nibabel python3-matplotlib python3-seaborn \
-                   python3-humanize
+                   python3-humanize \
+                   python3-pip
+
+################################################################################
+# Install the package and its dependencies
+################################################################################
+
+pip3 install .
 
 ################################################################################
 # Remember the context

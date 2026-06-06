@@ -7,7 +7,7 @@ starelib module
 ================
 
 
-.. automodule:: starelib
+.. automodule:: stare_pet.starelib
   :members:
   :undoc-members:
 
