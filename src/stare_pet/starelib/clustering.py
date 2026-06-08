@@ -157,7 +157,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
                         resample_to_template=None, logger=None):
     """ Save centroid masks to disk, return the best one
 
-        :param list centroids: list of Centroid objects to write to disk
+        :param dict centroids: dict of Centroid objects to write to disk
         :param dict fits: k-means fit results for extracting labels
         :param Path output_path: The path for writing out masks
         :param Nifti1Image current_template: An image in cropped cluster space
@@ -173,7 +173,7 @@ def save_centroid_masks(centroids, fits, output_path, current_template, step=0,
     if output_path.exists():
         mask_path = output_path / "masks"
         mask_path.mkdir(exist_ok=True)
-        for centroid in centroids:
+        for k, centroid in centroids.items():
             if centroid.features.get("likely_vascular", False):
                 this_mask_path = mask_path / "vascular"
             elif centroid.features.get("likely_irreversible", False):
