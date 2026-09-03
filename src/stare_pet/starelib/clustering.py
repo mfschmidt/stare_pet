@@ -556,7 +556,8 @@ def load_or_calculate_clusters(
 
     results.cluster_centroids[step] = all_centroids
     results.cluster_model_fits[step] = model_fits
-    # As far as I can tell, only 'best_centroid' and 'best_cluster_as_image' get used. So we could probably clean this up. Two lines above also cover some of it.
+    # As far as I can tell, only 'best_centroid' and 'best_cluster_as_image' get used.
+    # So we could probably clean this up. Two lines above also cover some of it.
     return {
         'centroids': all_centroids,
         'fits': model_fits,
