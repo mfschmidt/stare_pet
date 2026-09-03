@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import argparse
 from pathlib import Path
@@ -65,8 +66,22 @@ class StareApp:
                 for directory in [
                     self.results.args.cache_path, self.results.args.debug_path
                 ]:
+                    # We could potentially have --debug off and saveable data
                     for cache_file in directory.iterdir():
-                        cache_file.unlink(missing_ok=True)
+                        if cache_file.is_file():
+                            cache_file.unlink(missing_ok=True)
+                        if cache_file.is_dir():
+                            if (
+                                    (cache_file.name == "components" and
+                                     self.results.args.decompose_components) or
+                                    (cache_file.name == "masks" and
+                                     self.results.args.save_all_cluster_masks)
+                            ):
+                                # Leave these alone
+                                pass
+                            else:
+                                self.results.logger.warning(f"Deleting {cache_file}")
+                                shutil.rmtree(cache_file, ignore_errors=True)
                     directory.rmdir()
             return 0
         else:
