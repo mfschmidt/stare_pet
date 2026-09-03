@@ -390,8 +390,8 @@ def render_masks(stare_output_path,
                  window_size=(1920, 1072), background_color="aliceblue",
                  brain_color="cornsilk", clip_color="dodgerblue",
                  step_1_color="lemonchiffon", step_2_color="red",
-                 include_pca=True,
-                 step_1_nii_file=None, step_2_nii_file=None, pc_file=None,
+                 include_brain=True, brain_file=None,
+                 step_1_nii_file=None, step_2_nii_file=None,
                  camera_up_angle = 15.0, camera_left_angle = 20.0,
                  title=None, save_image=True, save_movie=False, output_file=None,
                  show_in_notebook=False,
@@ -415,18 +415,22 @@ def render_masks(stare_output_path,
         Color of the brain shape in the scene. Default is "cornsilk".
     clip_color : str, optional
         Color of the clipping plane in the scene. Default is "dodgerblue".
-    include_pca : bool, optional
-        Whether to include PCA visualization using the `pc_file`. Default is True.
+    step_1_color : str, optional
+        Color of the step 1 cluster mask in the scene. Default is "lemonchiffon".
+    step_2_color : str, optional
+        Color of the step 2 cluster mask in the scene. Default is "red".
+    include_brain : bool, optional
+        Whether to include PCA visualization using the `brain_file`. Default is True.
+    brain_file : Path, optional
+        Path to the NIfTI file for a brain mask (or principal components). This is used if
+        `include_brain` is True. If not provided, a default path relative to `stare_output_path`
+        is used.
     step_1_nii_file : Path, optional
         Path to the NIfTI file for the vascular cluster produced during step 1. If not provided,
         a default path relative to `stare_output_path` is used.
     step_2_nii_file : Path, optional
         Path to the NIfTI file for the vascular cluster produced during step 2. If not provided,
         a default path relative to `stare_output_path` is used.
-    pc_file : Path, optional
-        Path to the NIfTI file for the principal component analysis mask. This is used if
-        `include_pca` is True. If not provided, a default path relative to `stare_output_path`
-        is used.
     camera_up_angle : float, optional
         Angle in degrees to tilt the camera upward from the center plane. Default is 15.0.
     camera_left_angle : float, optional
@@ -461,19 +465,33 @@ def render_masks(stare_output_path,
     if step_2_nii_file is None and step_1_nii_file is not None:
         # Explicitly render only the provided step_1, ignoring step_2
         step_2_nii_file = Path("/DOES/NOT/EXIST/FILE.nii.gz")
+    # If not explicitly provided, try four possibilities for the step one cluster mask
     if step_1_nii_file is None:
-        step_1_nii_file = stare_cluster_path / "cluster_step-1_best_mask_orig.nii.gz"
+        step_1_nii_file = stare_output_path / "masks" / "cluster_step-1_best_mask_orig.nii.gz"
         if not step_1_nii_file.exists():
-            step_1_nii_file = stare_output_path / "masks/cluster_step-1_best_mask.nii.gz"
+            step_1_nii_file = stare_output_path / "masks" / "cluster_step-1_best_mask.nii.gz"
+        if not step_1_nii_file.exists():
+            step_1_nii_file = stare_output_path / "clusters" / "cluster_step-1_best_mask_orig.nii.gz"
+        if not step_1_nii_file.exists():
+            step_1_nii_file = stare_output_path / "clusters" / "cluster_step-1_best_mask.nii.gz"
+    # If not explicitly provided, try four possibilities for the step two cluster mask
     if step_2_nii_file is None:
-        step_2_nii_file = stare_output_path / "masks/cluster_step-2_best_mask_orig.nii.gz"
+        step_2_nii_file = stare_output_path / "masks" / "cluster_step-2_best_mask_orig.nii.gz"
         if not step_2_nii_file.exists():
-            step_2_nii_file = stare_output_path / "masks/cluster_step-2_best_mask.nii.gz"
-    if include_pca and pc_file is None:
-        pc_file = stare_output_path / "debug/components/pca_6.nii.gz"
+            step_2_nii_file = stare_output_path / "masks" / "cluster_step-2_best_mask.nii.gz"
+        if not step_2_nii_file.exists():
+            step_2_nii_file = stare_output_path / "clusters" / "cluster_step-2_best_mask_orig.nii.gz"
+        if not step_2_nii_file.exists():
+            step_2_nii_file = stare_output_path / "clusters" / "cluster_step-2_best_mask.nii.gz"
+    if include_brain:
+        print(f"Using {brain_file} as brain approximation")
+        if brain_file is None:
+            brain_file = stare_output_path / "debug" / "components" / "pca_6.nii.gz"
+    else:
+        print(f"No brain reference. 'include_brain'={include_brain}; 'brain_file'={brain_file}")
 
     exemplar_file = step_1_nii_file
-    for file in [step_1_nii_file, step_2_nii_file, pc_file, ]:
+    for file in [step_1_nii_file, step_2_nii_file, brain_file, ]:
         if file is not None and file != False and file.exists():
             exemplar_file = file
             break
@@ -503,38 +521,58 @@ def render_masks(stare_output_path,
         show_edges=True,
     )
     # Add a "brain" shape to the scene.
-    if include_pca and pc_file.exists():
+    if include_brain and brain_file.exists():
         if verbose:
-            print(f"  Adding PCA mask: {pc_file.name}")
+            print(f"  Adding PCA mask: {brain_file.name}")
 
 
-        pc_img = nib.nifti1.Nifti1Image.from_filename(pc_file)
-        mask_images = list()
-        for i in range(6):
-            pc_data = pc_img.get_fdata()[:, :, :, i].squeeze()
-            pc_mask = np.array(
-                pc_data > np.percentile(pc_data, 95),
+        def mask_from_data(mask_3d_data):
+            """ From a 3d array of neuroimaging data, return a binary mask """
+            mask = np.array(
+                mask_3d_data > np.percentile(mask_3d_data, 95),
                 dtype=np.uint8
             )
-            pc_mask_img = nib.Nifti1Image(pc_mask, pc_img.affine)
-            _pct_in = pc_brain_likelihood(
-                pc_mask_img,
-                save_img_as=str(pc_file).replace(".nii.gz", "_sphere.nii.gz"),
-                verbose=True
+            return nib.Nifti1Image(mask, pc_img.affine)
+
+        brain_img = nib.nifti1.Nifti1Image.from_filename(brain_file)
+        mask_images = list()
+        if (    (brain_file is not None) and
+                (Path(brain_file).name == "pca_6.nii.gz") and
+                (len(brain_img.shape) == 4)
+        ):
+            # This is a principal components file.
+            # We need to check that voxels are within a sphere.
+            for i in range(6):
+                pc_data = brain_img.get_fdata()[:, :, :, i].squeeze()
+                pc_mask = np.array(
+                    pc_data > np.percentile(pc_data, 95),
+                    dtype=np.uint8
+                )
+                pc_mask_img = nib.Nifti1Image(pc_mask, brain_img.affine)
+                _pct_in = pc_brain_likelihood(
+                    pc_mask_img,
+                    save_img_as=str(brain_file).replace(".nii.gz", "_sphere.nii.gz"),
+                    verbose=True
+                )
+                print(f"writing sphere to {str(brain_file).replace('.nii.gz', '_sphere.nii.gz')}")
+                print(f"pc {i} {_pct_in:.2%} score indicating brain.")
+                # file_path = str(brain_file).replace("_6", f"_{i}_mask")
+                # pca_mask_img.to_filename(file_path)
+                if _pct_in > 0.90:
+                    mask_images.append(pc_mask_img)
+                    # Use the first PC that isn't scattered noise
+        else:
+            # For an explicit brain mask, no need to check it's within a sphere.
+            brain_data = brain_img.get_fdata()
+            brain_mask = np.array(
+                brain_data > np.percentile(brain_data, 95), dtype=np.uint8
             )
-            print(f"writing sphere to {str(pc_file).replace('.nii.gz', '_sphere.nii.gz')}")
-            print(f"pc {i} {_pct_in:.2%} score indicating brain.")
-            # file_path = str(pc_file).replace("_6", f"_{i}_mask")
-            # pca_mask_img.to_filename(file_path)
-            if _pct_in > 0.90:
-                mask_images.append(pc_mask_img)
-                # Use the first PC that isn't scattered noise
-
-
-        _ = p.add_mesh(
-            nifti_mask_to_mesh(mask_images[0], method="marching cubes", verbose=verbose),
-            color=brain_color, opacity=0.1, show_edges=False,
-        )
+            mask_images.append(nib.Nifti1Image(brain_mask, brain_img.affine))
+        if len(mask_images) > 0:
+            _ = p.add_mesh(
+                nifti_mask_to_mesh(mask_images[0], method="marching cubes", verbose=verbose),
+                color=brain_color, opacity=0.1, show_edges=False,
+            )
 
 
     # Add step 1 vascular cluster to the scene
@@ -707,6 +745,6 @@ def render_masks(stare_output_path,
         'plotter': p,
         'step_1_nii_file': step_1_nii_file,
         'step_2_nii_file': step_2_nii_file,
-        'pc_file': pc_file,
+        'brain_file': brain_file,
         'clip': axial_slices_to_clip,
     }
